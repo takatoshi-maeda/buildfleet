@@ -59,7 +59,7 @@
 - App Server schema/型生成コマンドの実行と成果物取り込み
 
 ```bash
-codex app-server generate-ts --out ./schemas
+codex app-server generate-ts --out ./src/generated/app-server/types
 codex app-server generate-json-schema --out ./schemas
 ```
 - 読み込み時/書き込み前後の AJV 検証
@@ -74,7 +74,7 @@ codex app-server generate-json-schema --out ./schemas
 完了条件:
 
 - 正常系 JSON は全て通る。
-- App Server 生成 schema/TS 型が `schemas/` に反映される。
+- App Server 生成 TS 型が `src/generated/app-server/types/*` に反映される。
 - 不正 JSON で明示的なエラーコードを返す。
 
 成果物:
@@ -263,4 +263,3 @@ codex app-server generate-json-schema --out ./schemas
 3. Phase 3 と Phase 4 を分離 PR で実装。
 4. Phase 5 で `fleetctl up` の foreground/background と app-server handshake を先に固定。
 5. Phase 6 以降で watcher と運用文書を整備。
-

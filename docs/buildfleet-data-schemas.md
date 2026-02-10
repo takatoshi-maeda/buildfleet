@@ -122,9 +122,11 @@
 - App Server の型/スキーマは手書きせず、以下で生成した成果物を利用する。
 
 ```bash
-codex app-server generate-ts --out ./schemas
+codex app-server generate-ts --out ./src/generated/app-server/types
 codex app-server generate-json-schema --out ./schemas
 ```
+
+- 生成された App Server の TS 型は `src/generated/app-server/types/*` に配置する。
 
 - App Server バージョン更新時は上記コマンドを再実行し、差分をレビューして反映する。
 

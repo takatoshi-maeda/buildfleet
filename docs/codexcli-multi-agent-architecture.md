@@ -362,9 +362,11 @@ src/
 - App Server 連携の型/スキーマは手動定義でなく、以下の生成コマンドで取得した成果物を利用する。
 
 ```bash
-codex app-server generate-ts --out ./schemas
+codex app-server generate-ts --out ./src/generated/app-server/types
 codex app-server generate-json-schema --out ./schemas
 ```
+
+- 生成された App Server の TS 型は `src/generated/app-server/types/*` を参照する。
 
 - App Server バージョン更新時は再生成して差分をレビューする。
 - `buildfleet doctor` で整合性診断（孤立 item、未参照 acceptance test 等）。
