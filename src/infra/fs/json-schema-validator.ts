@@ -1,5 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import type { ErrorObject, ValidateFunction } from "ajv";
 import * as Ajv2020Module from "ajv/dist/2020.js";
 import * as AjvFormatsModule from "ajv-formats";
@@ -17,6 +18,7 @@ const ajv = new Ajv2020Ctor({ allErrors: true, strict: false }) as {
 addFormats(ajv);
 
 const validatorCache = new Map<string, ValidateFunction>();
+const packageRootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 
 function formatValidationErrors(errors: ErrorObject[] | null | undefined): string {
   if (!errors || errors.length === 0) {
@@ -32,7 +34,9 @@ function formatValidationErrors(errors: ErrorObject[] | null | undefined): strin
 }
 
 async function loadValidator(schemaPath: string): Promise<ValidateFunction> {
-  const resolvedPath = path.resolve(schemaPath);
+  // Schema paths are package-owned assets; resolve them from package root so CLI behavior
+  // stays stable regardless of the user's current working directory.
+  const resolvedPath = path.isAbsolute(schemaPath) ? schemaPath : path.resolve(packageRootDir, schemaPath);
 
   const cached = validatorCache.get(resolvedPath);
   if (cached) {

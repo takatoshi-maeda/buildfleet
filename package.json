@@ -4,16 +4,23 @@
   "private": true,
   "type": "module",
   "bin": {
-    "buildfleet": "./dist/cli/index.js"
+    "buildfleet": "./bin/buildfleet"
   },
+  "files": [
+    "dist",
+    "bin",
+    "docs/schemas"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "prepack": "npm run build",
     "test": "vitest run",
     "test:watch": "vitest",
     "generate:app-server:types": "codex app-server generate-ts --out ./src/generated/app-server/types"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
+    "tsx": "^4.21.0",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"
   },

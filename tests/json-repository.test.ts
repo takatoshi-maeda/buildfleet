@@ -60,4 +60,19 @@ describe("JsonRepository", () => {
       code: "ERR_VALIDATION",
     });
   });
+
+  it("resolves schema paths independent of cwd", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "buildfleet-json-repo-cwd-"));
+    const targetFile = path.join(tempDir, "spec.json");
+    await fs.writeFile(targetFile, JSON.stringify(validSpec), "utf8");
+
+    const previousCwd = process.cwd();
+    process.chdir(tempDir);
+    try {
+      const repo = new JsonRepository<AcceptanceTestingSpec>(targetFile, SCHEMA_PATHS.acceptanceTestingSpec);
+      await expect(repo.get()).resolves.toEqual(validSpec);
+    } finally {
+      process.chdir(previousCwd);
+    }
+  });
 });
