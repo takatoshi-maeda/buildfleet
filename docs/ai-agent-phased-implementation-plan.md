@@ -9,7 +9,7 @@
 ## 0. 実行方針
 
 - 実装はフェーズ順に進める（前フェーズの完了条件を満たすまで次へ進まない）。
-- 各フェーズで `PM` が受け入れ基準を確認し、`Developer` が実装、`QA` が検証を担当する。
+- 各フェーズで `Orchestrator` が受け入れ基準を確認し、`Developer` が実装、`Gatekeeper` が検証を担当する。
 - すべての JSON ファイル読み書きで schema validation を実施する。
 - Codex App Server 連携は `fleetctl` の内部実装に限定する。
 
@@ -29,9 +29,9 @@
 
 担当:
 
-- PM: 受け入れ基準確定
+- Orchestrator: 受け入れ基準確定
 - Developer: 実装
-- QA: スモークテスト
+- Gatekeeper: スモークテスト
 
 完了条件:
 
@@ -66,10 +66,10 @@ codex app-server generate-json-schema --out ./schemas
 
 担当:
 
-- PM: バリデーション失敗時メッセージ方針を確定
-- PM: App Server 生成スキーマ差分レビュー基準を確定
+- Orchestrator: バリデーション失敗時メッセージ方針を確定
+- Orchestrator: App Server 生成スキーマ差分レビュー基準を確定
 - Developer: 実装
-- QA: 不正データケース検証
+- Gatekeeper: 不正データケース検証
 
 完了条件:
 
@@ -98,9 +98,9 @@ codex app-server generate-json-schema --out ./schemas
 
 担当:
 
-- PM: status 遷移受け入れ確認
+- Orchestrator: status 遷移受け入れ確認
 - Developer: 実装
-- QA: result 先行書き込みと整合回復検証
+- Gatekeeper: result 先行書き込みと整合回復検証
 
 完了条件:
 
@@ -123,19 +123,19 @@ codex app-server generate-json-schema --out ./schemas
 - `backlog epic|item add|list|update|delete`
 - `wait-implementation` の list ガード
 - `change-logs/*.md` front matter 書き込み
-- `visibility` と `--include-hidden`（PM 限定）
+- `visibility` と `--include-hidden`（Orchestrator 限定）
 - `acceptanceTestIds` 参照整合性チェック
 
 担当:
 
-- PM: 可視性仕様・権限確認
+- Orchestrator: 可視性仕様・権限確認
 - Developer: 実装
-- QA: mtime ガードと権限制約の検証
+- Gatekeeper: mtime ガードと権限制約の検証
 
 完了条件:
 
 - `latestChangeLogMtime < itemsMtime` のとき `ERR_BACKLOG_SNAPSHOT_NOT_STABLE` を返す。
-- `--include-hidden` は PM ロールのみ成功する。
+- `--include-hidden` は Orchestrator ロールのみ成功する。
 
 成果物:
 
@@ -160,9 +160,9 @@ codex app-server generate-json-schema --out ./schemas
 
 担当:
 
-- PM: 運用コマンドの最終確認
+- Orchestrator: 運用コマンドの最終確認
 - Developer: 実装
-- QA: 起動モード・死活監視・ログ集約・handshake の検証
+- Gatekeeper: 起動モード・死活監視・ログ集約・handshake の検証
 
 完了条件:
 
@@ -192,9 +192,9 @@ codex app-server generate-json-schema --out ./schemas
 
 担当:
 
-- PM: イベント優先順位と再試行方針承認
+- Orchestrator: イベント優先順位と再試行方針承認
 - Developer: 実装
-- QA: E2E シナリオ検証
+- Gatekeeper: E2E シナリオ検証
 
 完了条件:
 
@@ -221,9 +221,9 @@ codex app-server generate-json-schema --out ./schemas
 
 担当:
 
-- PM: リリース可否判定
+- Orchestrator: リリース可否判定
 - Developer: 実装とCI整備
-- QA: 回帰テスト
+- Gatekeeper: 回帰テスト
 
 完了条件:
 
@@ -246,13 +246,13 @@ codex app-server generate-json-schema --out ./schemas
 
 ## 3. エージェント運用ルール（実装時）
 
-- PM:
+- Orchestrator:
   - 各フェーズ開始前に受け入れ基準を Issue 化する。
   - 各フェーズ終了時に「完了条件チェック」を実施する。
 - Developer:
   - 1 PR = 1フェーズ内の単一テーマを原則とする。
   - スキーマ変更時は `docs/buildfleet-data-schemas.md` を同時更新する。
-- QA:
+- Gatekeeper:
   - 各フェーズで最低1つの異常系テストを必須化する。
   - `fleetctl` 系は foreground/background 両モードを必ず検証する。
 

@@ -100,16 +100,16 @@
 - `roles.json` の `agents[].id` にはエージェント識別子を設定する（例: `pm-agent`, `dev-agent-1`, `qa-agent`）。
 - 未登録エージェントは `Developer` として扱う。
 - `fleetctl --role <Role>` は `roles.json` に基づくロール単位の対象抽出に使用する。
-- `--include-hidden`、`epic/item delete --force` は `PM` のみ許可。
+- `--include-hidden`、`epic/item delete --force` は `Orchestrator` のみ許可。
 
 サンプル:
 
 ```json
 {
   "agents": [
-    { "id": "pm-agent", "role": "PM" },
+    { "id": "pm-agent", "role": "Orchestrator" },
     { "id": "dev-agent-1", "role": "Developer" },
-    { "id": "qa-agent", "role": "QA" }
+    { "id": "qa-agent", "role": "Gatekeeper" }
   ]
 }
 ```

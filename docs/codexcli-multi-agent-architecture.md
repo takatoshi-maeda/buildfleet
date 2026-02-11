@@ -1,11 +1,11 @@
 # CodexCLI 複数エージェント統合 技術設計（TypeScript）
 
 ## 1. 目的
-PM / Developer / QA の複数ロールが、CodexCLI 上で同一リポジトリを安全に扱えるようにする。主な狙いは次の 3 点。
+Orchestrator / Developer / Gatekeeper の複数ロールが、CodexCLI 上で同一リポジトリを安全に扱えるようにする。主な狙いは次の 3 点。
 
 1. **イベント駆動で役割ごとの処理を連携**すること。
 2. **ファイルベースの状態管理（JSON + Markdown）**を維持しつつ整合性を保つこと。
-3. PM の計画更新中に開発が先行しないよう、`backlog list --status=wait-implementation` に対して**変更ログ更新時刻によるガード**を実現すること。
+3. Orchestrator の計画更新中に開発が先行しないよう、`backlog list --status=wait-implementation` に対して**変更ログ更新時刻によるガード**を実現すること。
 
 ---
 
@@ -98,7 +98,7 @@ PM / Developer / QA の複数ロールが、CodexCLI 上で同一リポジトリ
 ```md
 ---
 id: CHG-20260112-001
-actor: PM
+actor: Orchestrator
 type: backlog-update
 createdAt: 2026-01-12T02:05:00Z
 itemsJsonVersion: 3
@@ -116,23 +116,23 @@ itemsJsonVersion: 3
 
 ```ts
 type SystemEvent =
-  | { type: "manual.triggered"; actor: "PM" | "QA" | "Developer" }
+  | { type: "manual.triggered"; actor: "Orchestrator" | "Gatekeeper" | "Developer" }
   | { type: "git.main.updated"; commit: string }
   | { type: "acceptance.result.created"; path: string }
-  | { type: "backlog.poll.tick"; actor: "Developer" | "QA"; at: string }
+  | { type: "backlog.poll.tick"; actor: "Developer" | "Gatekeeper"; at: string }
   | { type: "fleet.lifecycle.changed"; status: "starting" | "running" | "stopped" | "degraded" };
 ```
 
 ## 5.2 要件とのマッピング
 
-- PM/QA
+- Orchestrator/Gatekeeper
   - `manual.triggered`
   - `git.main.updated`
   - 対応コマンド: `acceptance-test list|add|update|delete`
-- PM
+- Orchestrator
   - `acceptance.result.created`
   - 対応コマンド: `backlog epic|item add|list|update|delete`
-- Developer/QA
+- Developer/Gatekeeper
   - `backlog.poll.tick`（ポーリング）
   - 対応コマンド: `backlog list --status=wait-implementation`
 
@@ -176,7 +176,7 @@ buildfleet fleetctl up -d
 buildfleet fleetctl up --role Developer
 buildfleet fleetctl up --role Developer -d
 buildfleet fleetctl down --all
-buildfleet fleetctl down --role QA
+buildfleet fleetctl down --role Gatekeeper
 buildfleet fleetctl restart --all
 buildfleet fleetctl logs --role Developer --tail 200
 ```
@@ -205,7 +205,7 @@ buildfleet fleetctl logs --role Developer --tail 200
 
 ### 7.1 意図
 
-PM が `items.json` を更新した直後、change-log 作成完了前に開発者が実装着手対象を取得することを防ぐ。
+Orchestrator が `items.json` を更新した直後、change-log 作成完了前に開発者が実装着手対象を取得することを防ぐ。
 
 ### 7.2 実装方針
 
@@ -234,7 +234,7 @@ if (latestChangeLogMtime < itemsMtime) {
 - Epic に `visibility` を持たせる。
 - `visibility.type = blocked-until-epic-complete`
 - `dependsOnEpicIds` の全 Epic が `done` になるまで、`backlog list` デフォルト出力から除外。
-- `--include-hidden` で PM のみ確認可能。
+- `--include-hidden` で Orchestrator のみ確認可能。
 
 判定ロジック:
 
@@ -249,14 +249,14 @@ function isVisible(epic: Epic, epicsById: Map<string, Epic>): boolean {
 
 ## 9. 中央リポジトリからの Clone 作業モデル
 
-Developer/QA は中央リポジトリから作業ディレクトリを作成:
+Developer/Gatekeeper は中央リポジトリから作業ディレクトリを作成:
 
 1. `git clone <central-repo> work/<user>/<ticket>`
 2. `buildfleet backlog list --status=wait-implementation`
 3. 対象 item を `in-progress` へ更新（PR 前提）
 4. 実装・テスト
 5. `spec.json` のテストケース実行結果を `.buildfleet/data/acceptance-testing/results/*.json` に記録（必要に応じて）
-6. PR マージで `main` 更新 → PM/QA 側イベントが再実行
+6. PR マージで `main` 更新 → Orchestrator/Gatekeeper 側イベントが再実行
 
 補助コマンド（任意）:
 
