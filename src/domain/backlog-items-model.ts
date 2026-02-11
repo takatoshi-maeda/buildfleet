@@ -11,6 +11,7 @@ export interface VisibilityRule {
 export interface BacklogEpic {
   id: string;
   title: string;
+  notes?: string[];
   status: BacklogEpicStatus;
   visibility: VisibilityRule;
   acceptanceTestIds: string[];
@@ -21,6 +22,7 @@ export interface BacklogItem {
   id: string;
   epicId: string;
   title: string;
+  notes?: string[];
   status: BacklogItemStatus;
   acceptanceTestIds: string[];
   updatedAt: string;

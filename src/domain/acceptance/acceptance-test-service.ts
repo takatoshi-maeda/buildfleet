@@ -16,6 +16,7 @@ const ACCEPTANCE_DATA_DIR = ".buildfleet/data/acceptance-testing";
 
 interface AddAcceptanceTestInput {
   title: string;
+  notes?: string[];
   status?: AcceptanceTestCaseStatus;
   epicIds: string[];
   itemIds: string[];
@@ -24,6 +25,8 @@ interface AddAcceptanceTestInput {
 interface UpdateAcceptanceTestInput {
   id: string;
   title?: string;
+  addNotes?: string[];
+  removeNotes?: string[];
   status?: AcceptanceTestCaseStatus;
   epicIds?: string[];
   itemIds?: string[];
@@ -68,6 +71,7 @@ export class AcceptanceTestService {
     const testCase: AcceptanceTestCase = {
       id: this.nextTestId(spec.tests),
       title: input.title,
+      notes: unique(input.notes ?? []),
       status: input.status ?? "draft",
       lastExecutionStatus: "not-run",
       epicIds: unique(input.epicIds),
@@ -96,6 +100,12 @@ export class AcceptanceTestService {
 
     if (input.title !== undefined) {
       found.title = input.title;
+    }
+
+    if (input.addNotes || input.removeNotes) {
+      // Notes are managed as a set-like list by exact string match for deterministic updates.
+      const removeSet = new Set(input.removeNotes ?? []);
+      found.notes = unique([...(found.notes ?? []), ...(input.addNotes ?? [])].filter((note) => !removeSet.has(note)));
     }
 
     if (input.epicIds) {

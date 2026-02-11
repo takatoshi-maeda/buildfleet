@@ -33,12 +33,14 @@ export function createAcceptanceTestCommand(): Command {
     .command("add")
     .description("Add an acceptance test")
     .requiredOption("--title <title>", "Title")
+    .option("--note <note>", "Note", collectRepeatable, [])
     .option("--status <status>", "Status", "draft")
     .option("--epic <epicId>", "Epic ID", collectRepeatable, [])
     .option("--item <itemId>", "Item ID", collectRepeatable, [])
     .action(async (options) => {
       const test = await service.add({
         title: options.title,
+        notes: options.note,
         status: options.status as AcceptanceTestCaseStatus,
         epicIds: options.epic,
         itemIds: options.item,
@@ -51,6 +53,8 @@ export function createAcceptanceTestCommand(): Command {
     .description("Update an acceptance test")
     .requiredOption("--id <id>", "Acceptance test ID")
     .option("--title <title>", "Title")
+    .option("--add-note <note>", "Append note", collectRepeatable, [])
+    .option("--remove-note <note>", "Remove note by exact match", collectRepeatable, [])
     .option("--status <status>", "Status")
     .option("--epic <epicId>", "Epic IDs (replace)", collectRepeatable)
     .option("--item <itemId>", "Item IDs (replace)", collectRepeatable)
@@ -58,6 +62,8 @@ export function createAcceptanceTestCommand(): Command {
       const test = await service.update({
         id: options.id,
         title: options.title,
+        addNotes: options.addNote,
+        removeNotes: options.removeNote,
         status: options.status as AcceptanceTestCaseStatus | undefined,
         epicIds: options.epic,
         itemIds: options.item,

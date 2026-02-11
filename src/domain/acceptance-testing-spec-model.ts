@@ -5,6 +5,7 @@ export type AcceptanceTestExecutionStatus = "not-run" | "passed" | "failed";
 export interface AcceptanceTestCase {
   id: string;
   title: string;
+  notes?: string[];
   status: AcceptanceTestCaseStatus;
   lastExecutionStatus: AcceptanceTestExecutionStatus;
   epicIds: string[];

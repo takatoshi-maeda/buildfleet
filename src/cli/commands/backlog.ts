@@ -27,6 +27,7 @@ export function createBacklogCommand(): Command {
   epic
     .command("add")
     .requiredOption("--title <title>", "Epic title")
+    .option("--note <note>", "Epic note", collectRepeatable, [])
     .option("--status <status>", "Epic status", "todo")
     .option("--visibility-type <type>", "always-visible or blocked-until-epic-complete", "always-visible")
     .option("--depends-on <epicId>", "Epic dependency id", collectRepeatable, [])
@@ -35,6 +36,7 @@ export function createBacklogCommand(): Command {
     .action(async (options) => {
       const epicResult = await service.addEpic({
         title: options.title,
+        notes: options.note,
         status: options.status as BacklogEpicStatus,
         visibility: {
           type: options.visibilityType as VisibilityType,
@@ -65,6 +67,8 @@ export function createBacklogCommand(): Command {
     .command("update")
     .requiredOption("--id <id>", "Epic id")
     .option("--title <title>", "Epic title")
+    .option("--add-note <note>", "Append epic note", collectRepeatable, [])
+    .option("--remove-note <note>", "Remove epic note by exact match", collectRepeatable, [])
     .option("--status <status>", "Epic status")
     .option("--reopen", "Allow done -> in-progress")
     .option("--visibility-type <type>", "always-visible or blocked-until-epic-complete")
@@ -82,6 +86,8 @@ export function createBacklogCommand(): Command {
       const updated = await service.updateEpic({
         id: options.id,
         title: options.title,
+        addNotes: options.addNote,
+        removeNotes: options.removeNote,
         status: options.status as BacklogEpicStatus | undefined,
         reopen: Boolean(options.reopen),
         visibility,
@@ -106,6 +112,7 @@ export function createBacklogCommand(): Command {
     .command("add")
     .requiredOption("--epic <epicId>", "Epic id")
     .requiredOption("--title <title>", "Item title")
+    .option("--note <note>", "Item note", collectRepeatable, [])
     .option("--status <status>", "Item status", "todo")
     .option("--acceptance-test <testId>", "Acceptance test id", collectRepeatable, [])
     .option("--actor-id <actorId>", "Current actor id")
@@ -113,6 +120,7 @@ export function createBacklogCommand(): Command {
       const added = await service.addItem({
         epicId: options.epic,
         title: options.title,
+        notes: options.note,
         status: options.status as BacklogItemStatus,
         acceptanceTestIds: options.acceptanceTest,
         actorId: options.actorId,
@@ -139,6 +147,8 @@ export function createBacklogCommand(): Command {
     .command("update")
     .requiredOption("--id <id>", "Item id")
     .option("--title <title>", "Item title")
+    .option("--add-note <note>", "Append item note", collectRepeatable, [])
+    .option("--remove-note <note>", "Remove item note by exact match", collectRepeatable, [])
     .option("--status <status>", "Item status")
     .option("--reopen", "Allow done -> in-progress")
     .option("--acceptance-test <testId>", "Acceptance test ids (replace)", collectRepeatable)
@@ -147,6 +157,8 @@ export function createBacklogCommand(): Command {
       const updated = await service.updateItem({
         id: options.id,
         title: options.title,
+        addNotes: options.addNote,
+        removeNotes: options.removeNote,
         status: options.status as BacklogItemStatus | undefined,
         reopen: Boolean(options.reopen),
         acceptanceTestIds: options.acceptanceTest,

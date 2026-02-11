@@ -13,6 +13,7 @@ describe("AcceptanceTestService", () => {
 
     const test = await service.add({
       title: "smoke",
+      notes: ["smoke test notes"],
       epicIds: ["E-001"],
       itemIds: ["I-001"],
     });
@@ -34,6 +35,7 @@ describe("AcceptanceTestService", () => {
 
     expect(savedResult.status).toBe("passed");
     expect(spec.tests[0].lastExecutionStatus).toBe("passed");
+    expect(spec.tests[0].notes).toEqual(["smoke test notes"]);
   });
 
   it("self-heals cached status from latest result json", async () => {
@@ -89,5 +91,31 @@ describe("AcceptanceTestService", () => {
     ).rejects.toMatchObject<Partial<BuildfleetError>>({
       code: "ERR_VALIDATION",
     });
+  });
+
+  it("appends and removes notes", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "buildfleet-acceptance-"));
+    const dataDir = path.join(tempDir, ".buildfleet/data/acceptance-testing");
+    const service = new AcceptanceTestService(dataDir);
+
+    const test = await service.add({
+      title: "notes target",
+      epicIds: ["E-004"],
+      itemIds: ["I-004"],
+    });
+
+    const updated = await service.update({
+      id: test.id,
+      addNotes: ["first", "second"],
+    });
+    expect(updated.notes).toEqual(["first", "second"]);
+
+    const updatedAgain = await service.update({
+      id: test.id,
+      addNotes: ["third", "second"],
+      removeNotes: ["first"],
+    });
+
+    expect(updatedAgain.notes).toEqual(["second", "third"]);
   });
 });

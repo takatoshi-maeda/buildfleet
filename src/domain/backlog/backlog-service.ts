@@ -31,6 +31,7 @@ interface ListInput {
 
 interface AddEpicInput {
   title: string;
+  notes?: string[];
   status?: BacklogEpicStatus;
   visibility?: VisibilityRule;
   acceptanceTestIds: string[];
@@ -40,6 +41,8 @@ interface AddEpicInput {
 interface UpdateEpicInput {
   id: string;
   title?: string;
+  addNotes?: string[];
+  removeNotes?: string[];
   status?: BacklogEpicStatus;
   visibility?: VisibilityRule;
   acceptanceTestIds?: string[];
@@ -50,6 +53,7 @@ interface UpdateEpicInput {
 interface AddItemInput {
   epicId: string;
   title: string;
+  notes?: string[];
   status?: BacklogItemStatus;
   acceptanceTestIds: string[];
   actorId?: string;
@@ -58,6 +62,8 @@ interface AddItemInput {
 interface UpdateItemInput {
   id: string;
   title?: string;
+  addNotes?: string[];
+  removeNotes?: string[];
   status?: BacklogItemStatus;
   acceptanceTestIds?: string[];
   reopen?: boolean;
@@ -125,6 +131,7 @@ export class BacklogService {
     const epic: BacklogEpic = {
       id: nextEpicId(items.epics),
       title: input.title,
+      notes: unique(input.notes ?? []),
       status: input.status ?? "todo",
       visibility: input.visibility ?? defaultVisibility(),
       acceptanceTestIds: unique(input.acceptanceTestIds),
@@ -158,6 +165,11 @@ export class BacklogService {
 
     if (input.title !== undefined) {
       epic.title = input.title;
+    }
+
+    if (input.addNotes || input.removeNotes) {
+      const removeSet = new Set(input.removeNotes ?? []);
+      epic.notes = unique([...(epic.notes ?? []), ...(input.addNotes ?? [])].filter((note) => !removeSet.has(note)));
     }
 
     if (input.visibility) {
@@ -208,6 +220,7 @@ export class BacklogService {
       id: nextItemId(items.items),
       epicId: input.epicId,
       title: input.title,
+      notes: unique(input.notes ?? []),
       status: input.status ?? "todo",
       acceptanceTestIds: unique(input.acceptanceTestIds),
       updatedAt: now,
@@ -240,6 +253,11 @@ export class BacklogService {
 
     if (input.title !== undefined) {
       item.title = input.title;
+    }
+
+    if (input.addNotes || input.removeNotes) {
+      const removeSet = new Set(input.removeNotes ?? []);
+      item.notes = unique([...(item.notes ?? []), ...(input.addNotes ?? [])].filter((note) => !removeSet.has(note)));
     }
 
     const now = new Date().toISOString();
