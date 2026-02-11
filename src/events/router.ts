@@ -8,19 +8,19 @@ export type SystemEvent =
   | { type: "fleet.lifecycle.changed"; status: "starting" | "running" | "stopped" | "degraded" };
 
 export interface CommandExecution {
-  command: string;
+  executable: string;
   args: string[];
 }
 
 export interface CommandDispatcher {
-  dispatch(command: string, args: string[]): Promise<void>;
+  dispatch(executable: string, args: string[]): Promise<void>;
 }
 
-export function createCodefleetCommandDispatcher(binary: string = "codefleet"): CommandDispatcher {
+export function createCodefleetCommandDispatcher(): CommandDispatcher {
   return {
-    dispatch(command, args) {
+    dispatch(executable, args) {
       return new Promise((resolve, reject) => {
-        const child = spawn(binary, [command, ...args], { stdio: "inherit" });
+        const child = spawn(executable, args, { stdio: "inherit" });
         child.once("error", reject);
         child.once("exit", (code) => {
           if (code === 0) {
@@ -28,7 +28,7 @@ export function createCodefleetCommandDispatcher(binary: string = "codefleet"): 
             return;
           }
 
-          reject(new Error(`command failed: ${binary} ${command} ${args.join(" ")} (exit ${code ?? "unknown"})`));
+          reject(new Error(`command failed: ${executable} ${args.join(" ")} (exit ${code ?? "unknown"})`));
         });
       });
     },
@@ -72,7 +72,7 @@ export class EventRouter {
 
     const executions = this.mapToExecutions(event);
     for (const execution of executions) {
-      await this.dispatcher.dispatch(execution.command, execution.args);
+      await this.dispatcher.dispatch(execution.executable, execution.args);
     }
 
     this.handledEvents.set(dedupeKey, now);
@@ -83,13 +83,13 @@ export class EventRouter {
     switch (event.type) {
       case "manual.triggered":
       case "git.main.updated":
-        return [{ command: "acceptance-test", args: ["list"] }];
+        return [{ executable: "codefleet-acceptance-test", args: ["list"] }];
       case "acceptance.result.created":
-        return [{ command: "backlog", args: ["list"] }];
+        return [{ executable: "codefleet-backlog", args: ["list"] }];
       case "backlog.poll.tick":
-        return [{ command: "backlog", args: ["list", "--status", "wait-implementation"] }];
+        return [{ executable: "codefleet-backlog", args: ["list", "--status", "wait-implementation"] }];
       case "fleet.lifecycle.changed":
-        return [{ command: "fleetctl", args: ["status"] }];
+        return [{ executable: "codefleet", args: ["status"] }];
       default: {
         const neverEvent: never = event;
         throw new Error(`unsupported event: ${JSON.stringify(neverEvent)}`);

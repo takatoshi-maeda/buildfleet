@@ -2,10 +2,15 @@ import { Command } from "commander";
 import type { BacklogEpicStatus, BacklogItemStatus, VisibilityType } from "../../domain/backlog-items-model.js";
 import { BacklogService } from "../../domain/backlog/backlog-service.js";
 
-export function createBacklogCommand(): Command {
-  const service = new BacklogService();
+interface BacklogCommandOptions {
+  commandName?: string;
+}
 
-  const cmd = new Command("backlog");
+export function createBacklogCommand(options: BacklogCommandOptions = {}): Command {
+  const service = new BacklogService();
+  const commandName = options.commandName ?? "backlog";
+
+  const cmd = new Command(commandName);
   cmd.description("Manage backlog epics and items.");
 
   cmd

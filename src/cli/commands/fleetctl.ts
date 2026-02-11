@@ -4,10 +4,15 @@ import type { AppServerSession } from "../../domain/app-server-session-model.js"
 import type { AgentRole } from "../../domain/roles-model.js";
 import { FleetService } from "../../domain/agents/fleet-service.js";
 
-export function createFleetctlCommand(): Command {
-  const service = new FleetService();
+interface FleetctlCommandOptions {
+  commandName?: string;
+}
 
-  const cmd = new Command("fleetctl");
+export function createFleetctlCommand(options: FleetctlCommandOptions = {}): Command {
+  const service = new FleetService();
+  const commandName = options.commandName ?? "fleetctl";
+
+  const cmd = new Command(commandName);
   cmd.description("Control codefleet agent processes.");
 
   cmd

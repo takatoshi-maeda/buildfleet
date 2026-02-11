@@ -5,10 +5,17 @@ import type {
 } from "../../domain/acceptance-testing-spec-model.js";
 import { AcceptanceTestService } from "../../domain/acceptance/acceptance-test-service.js";
 
-export function createAcceptanceTestCommand(): Command {
-  const service = new AcceptanceTestService();
+interface AcceptanceTestCommandOptions {
+  commandName?: string;
+  executableName?: string;
+}
 
-  const cmd = new Command("acceptance-test");
+export function createAcceptanceTestCommand(options: AcceptanceTestCommandOptions = {}): Command {
+  const service = new AcceptanceTestService();
+  const commandName = options.commandName ?? "acceptance-test";
+  const executableName = options.executableName ?? `codefleet ${commandName}`;
+
+  const cmd = new Command(commandName);
   cmd.description("Manage acceptance test specifications and results.");
   cmd.option(
     "--help-for-agent",
@@ -18,7 +25,7 @@ export function createAcceptanceTestCommand(): Command {
     if (!options.helpForAgent) {
       return;
     }
-    console.log(buildAgentUsageHelp());
+    console.log(buildAgentUsageHelp(executableName));
   });
 
   cmd
@@ -111,7 +118,7 @@ function collectRepeatable(value: string, previous: string[] = []): string[] {
   return [...previous, value];
 }
 
-function buildAgentUsageHelp(): string {
+function buildAgentUsageHelp(executableName: string): string {
   return [
     "# acceptance-test --help-for-agent",
     "",
@@ -124,9 +131,9 @@ function buildAgentUsageHelp(): string {
     "  - Keep epic/item links synchronized when plans change.",
     "- Key commands:",
     "```bash",
-    "codefleet acceptance-test add --title \"...\" --epic E-001 --item I-001",
-    "codefleet acceptance-test update --id AT-001 --status ready --epic E-001 --item I-001",
-    "codefleet acceptance-test list",
+    `${executableName} add --title "..." --epic E-001 --item I-001`,
+    `${executableName} update --id AT-001 --status ready --epic E-001 --item I-001`,
+    `${executableName} list`,
     "```",
     "",
     "### Developer",
@@ -136,8 +143,8 @@ function buildAgentUsageHelp(): string {
     "  - Update linked items after scope changes with orchestrator agreement.",
     "- Key commands:",
     "```bash",
-    "codefleet acceptance-test list",
-    "codefleet acceptance-test update --id AT-001 --item I-002",
+    `${executableName} list`,
+    `${executableName} update --id AT-001 --item I-002`,
     "```",
     "",
     "### Gatekeeper",
@@ -147,7 +154,7 @@ function buildAgentUsageHelp(): string {
     "  - Keep logs and artifacts linked for traceability and audits.",
     "- Key commands:",
     "```bash",
-    "codefleet acceptance-test result add --id AT-001 --status passed --summary \"...\" --artifact path/to/report",
+    `${executableName} result add --id AT-001 --status passed --summary "..." --artifact path/to/report`,
     "```",
   ].join("\n");
 }

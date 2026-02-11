@@ -4,7 +4,9 @@
   "private": true,
   "type": "module",
   "bin": {
-    "codefleet": "./bin/codefleet"
+    "codefleet": "./bin/codefleet",
+    "codefleet-acceptance-test": "./bin/codefleet-acceptance-test",
+    "codefleet-backlog": "./bin/codefleet-backlog"
   },
   "files": [
     "dist",

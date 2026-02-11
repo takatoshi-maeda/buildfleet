@@ -4,8 +4,8 @@ import { EventRouter, type CommandExecution } from "../src/events/router.js";
 class RecordingDispatcher {
   public executions: CommandExecution[] = [];
 
-  async dispatch(command: string, args: string[]): Promise<void> {
-    this.executions.push({ command, args });
+  async dispatch(executable: string, args: string[]): Promise<void> {
+    this.executions.push({ executable, args });
   }
 }
 
@@ -21,11 +21,11 @@ describe("EventRouter", () => {
     await router.route({ type: "fleet.lifecycle.changed", status: "running" });
 
     expect(dispatcher.executions).toEqual([
-      { command: "acceptance-test", args: ["list"] },
-      { command: "acceptance-test", args: ["list"] },
-      { command: "backlog", args: ["list"] },
-      { command: "backlog", args: ["list", "--status", "wait-implementation"] },
-      { command: "fleetctl", args: ["status"] },
+      { executable: "codefleet-acceptance-test", args: ["list"] },
+      { executable: "codefleet-acceptance-test", args: ["list"] },
+      { executable: "codefleet-backlog", args: ["list"] },
+      { executable: "codefleet-backlog", args: ["list", "--status", "wait-implementation"] },
+      { executable: "codefleet", args: ["status"] },
     ]);
   });
 

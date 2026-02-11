@@ -7,8 +7,8 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const binDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(binDir, "..");
-const distEntry = resolve(repoRoot, "dist/cli/codefleet.js");
-const srcEntry = resolve(repoRoot, "src/cli/codefleet.ts");
+const distEntry = resolve(repoRoot, "dist/cli/codefleet-acceptance-test.js");
+const srcEntry = resolve(repoRoot, "src/cli/codefleet-acceptance-test.ts");
 const requireFromBin = createRequire(import.meta.url);
 
 // Prefer compiled output for packaged use; fall back to TS runtime only in local development.
