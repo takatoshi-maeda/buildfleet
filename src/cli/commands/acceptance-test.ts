@@ -10,6 +10,16 @@ export function createAcceptanceTestCommand(): Command {
 
   const cmd = new Command("acceptance-test");
   cmd.description("Manage acceptance test specifications and results.");
+  cmd.option(
+    "--help-for-agent",
+    "Show role-specific guidance for acceptance-test command usage by agents",
+  );
+  cmd.action((options: { helpForAgent?: boolean }) => {
+    if (!options.helpForAgent) {
+      return;
+    }
+    console.log(buildAgentUsageHelp());
+  });
 
   cmd
     .command("list")
@@ -93,4 +103,45 @@ export function createAcceptanceTestCommand(): Command {
 
 function collectRepeatable(value: string, previous: string[] = []): string[] {
   return [...previous, value];
+}
+
+function buildAgentUsageHelp(): string {
+  return [
+    "# acceptance-test --help-for-agent",
+    "",
+    "## Role-specific use cases and recommended usage",
+    "",
+    "### Orchestrator",
+    "- Use case: Define and maintain acceptance criteria aligned with backlog planning.",
+    "- Recommended usage:",
+    "  - Add or update acceptance tests before implementation starts.",
+    "  - Keep epic/item links synchronized when plans change.",
+    "- Key commands:",
+    "```bash",
+    "buildfleet acceptance-test add --title \"...\" --epic E-001 --item I-001",
+    "buildfleet acceptance-test update --id AT-001 --status ready --epic E-001 --item I-001",
+    "buildfleet acceptance-test list",
+    "```",
+    "",
+    "### Developer",
+    "- Use case: Confirm expected behavior and readiness before coding.",
+    "- Recommended usage:",
+    "  - Review tests linked to your assigned item to clarify implementation intent.",
+    "  - Update linked items after scope changes with orchestrator agreement.",
+    "- Key commands:",
+    "```bash",
+    "buildfleet acceptance-test list",
+    "buildfleet acceptance-test update --id AT-001 --item I-002",
+    "```",
+    "",
+    "### Gatekeeper",
+    "- Use case: Record verification outcomes and maintain evidence.",
+    "- Recommended usage:",
+    "  - Record pass/fail results with concise summaries and artifact paths.",
+    "  - Keep logs and artifacts linked for traceability and audits.",
+    "- Key commands:",
+    "```bash",
+    "buildfleet acceptance-test result add --id AT-001 --status passed --summary \"...\" --artifact path/to/report",
+    "```",
+  ].join("\n");
 }
