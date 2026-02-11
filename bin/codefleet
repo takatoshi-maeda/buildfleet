@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
 import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -25,15 +25,37 @@ if (existsSync(distEntry)) {
   ];
 }
 
-const result = spawnSync(process.execPath, entryArgs, { stdio: "inherit" });
+const child = spawn(process.execPath, entryArgs, { stdio: "inherit" });
 
-if (result.error) {
-  console.error(result.error.message);
+let interruptSignal = null;
+const onInterrupt = (signal) => {
+  // Keep this wrapper alive so the child can run graceful shutdown handlers and decide exit code.
+  interruptSignal = signal;
+};
+
+process.on("SIGINT", onInterrupt);
+process.on("SIGTERM", onInterrupt);
+
+child.on("error", (error) => {
+  console.error(error.message);
   process.exit(1);
-}
+});
 
-if (typeof result.status === "number") {
-  process.exit(result.status);
-}
+child.on("exit", (code, signal) => {
+  process.removeListener("SIGINT", onInterrupt);
+  process.removeListener("SIGTERM", onInterrupt);
 
-process.exit(1);
+  if (typeof code === "number") {
+    process.exit(code);
+  }
+
+  if (signal === "SIGINT" || interruptSignal === "SIGINT") {
+    process.exit(130);
+  }
+
+  if (signal === "SIGTERM" || interruptSignal === "SIGTERM") {
+    process.exit(143);
+  }
+
+  process.exit(1);
+});

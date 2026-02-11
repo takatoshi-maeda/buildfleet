@@ -6,12 +6,16 @@ import { FleetProcessManager } from "../../infra/process/fleet-process-manager.j
 import { CodefleetError } from "../../shared/errors.js";
 import type { AgentRuntime, AgentRuntimeCollection } from "../agent-runtime-model.js";
 import type { AppServerSession, AppServerSessionCollection } from "../app-server-session-model.js";
-import type { AgentRole, Roles } from "../roles-model.js";
+import type { AgentRole } from "../roles-model.js";
 import { SCHEMA_PATHS } from "../schema-paths.js";
+import { getRoleStartupPrompt } from "./role-startup-prompts.js";
 
 const DEFAULT_ROLES_PATH = ".codefleet/roles.json";
 const DEFAULT_RUNTIME_DIR = ".codefleet/runtime";
 const DEFAULT_LOG_DIR = ".codefleet/logs/agents";
+const DEFAULT_GATEKEEPER_COUNT = 1;
+const DEFAULT_DEVELOPER_COUNT = 1;
+const FIXED_ORCHESTRATOR_COUNT = 1;
 
 export interface FleetStatus {
   summary: "running" | "stopped" | "degraded";
@@ -25,7 +29,6 @@ interface TargetInput {
 }
 
 export class FleetService {
-  private readonly rolesRepository: JsonRepository<Roles>;
   private readonly runtimeRepository: JsonRepository<AgentRuntimeCollection>;
   private readonly sessionRepository: JsonRepository<AppServerSessionCollection>;
 
@@ -36,7 +39,8 @@ export class FleetService {
     private readonly processManager: FleetProcessManager = new FleetProcessManager(),
     private readonly appServerClient: AppServerClient = new AppServerClient(),
   ) {
-    this.rolesRepository = new JsonRepository<Roles>(rolesPath, SCHEMA_PATHS.roles);
+    // Retained for compatibility with existing constructor call sites.
+    void this.rolesPath;
     this.runtimeRepository = new JsonRepository<AgentRuntimeCollection>(
       path.join(runtimeDir, "agents.json"),
       SCHEMA_PATHS.agentRuntime,
@@ -48,16 +52,27 @@ export class FleetService {
   }
 
   async status(role?: AgentRole): Promise<FleetStatus> {
-    const selectedIds = new Set((await this.resolveTargetAgents({ all: !role, role })).map((agent) => agent.id));
-    const runtimes = (await this.getOrInitializeRuntime()).agents.filter((agent) => selectedIds.has(agent.id));
-    const sessions = (await this.getOrInitializeSessions()).sessions.filter((session) => selectedIds.has(session.agentId));
+    const runtimeCollection = await this.getOrInitializeRuntime();
+    const sessionCollection = await this.getOrInitializeSessions();
+    const runtimes = role
+      ? runtimeCollection.agents.filter((agent) => agent.role === role)
+      : runtimeCollection.agents;
+    const selectedIds = new Set(runtimes.map((agent) => agent.id));
+    const sessions = sessionCollection.sessions.filter((session) => selectedIds.has(session.agentId));
 
     const summary = summarizeStatus(runtimes, sessions);
     return { summary, agents: runtimes, sessions };
   }
 
-  async up(input: { role?: AgentRole; detached?: boolean } = {}): Promise<FleetStatus> {
-    const targets = await this.resolveTargetAgents({ all: !input.role, role: input.role });
+  async up(input: {
+    detached?: boolean;
+    gatekeepers?: number;
+    developers?: number;
+  } = {}): Promise<FleetStatus> {
+    const targets = buildTargetAgents({
+      gatekeepers: input.gatekeepers ?? DEFAULT_GATEKEEPER_COUNT,
+      developers: input.developers ?? DEFAULT_DEVELOPER_COUNT,
+    });
     const runtime = await this.getOrInitializeRuntime();
     const sessions = await this.getOrInitializeSessions();
     const now = new Date().toISOString();
@@ -81,7 +96,14 @@ export class FleetService {
       });
 
       try {
-        const processStart = await this.processManager.start(target.id, process.cwd(), Boolean(input.detached));
+        const startupPrompt = await getRoleStartupPrompt(target.role);
+        const processStart = await this.appServerClient.startAgent({
+          agentId: target.id,
+          role: target.role,
+          prompt: startupPrompt,
+          cwd: process.cwd(),
+          detached: Boolean(input.detached),
+        });
         runtimeAgent.pid = processStart.pid;
         runtimeAgent.startedAt = processStart.startedAt;
         runtimeAgent.lastHeartbeatAt = processStart.startedAt;
@@ -120,12 +142,12 @@ export class FleetService {
     await this.runtimeRepository.save(runtime);
     await this.sessionRepository.save(sessions);
 
-    return this.status(input.role);
+    return this.status();
   }
 
   async down(input: TargetInput): Promise<FleetStatus> {
-    const targets = await this.resolveTargetAgents(input);
     const runtime = await this.getOrInitializeRuntime();
+    const targets = resolveRuntimeTargets(runtime.agents, input);
     const sessions = await this.getOrInitializeSessions();
     const now = new Date().toISOString();
 
@@ -163,13 +185,18 @@ export class FleetService {
     return this.status(input.role);
   }
 
-  async restart(input: { all?: boolean; role?: AgentRole; detached?: boolean }): Promise<FleetStatus> {
-    await this.down({ all: input.all, role: input.role });
-    return this.up({ role: input.role, detached: input.detached });
+  async restart(input: {
+    detached?: boolean;
+    gatekeepers?: number;
+    developers?: number;
+  }): Promise<FleetStatus> {
+    await this.down({ all: true });
+    return this.up(input);
   }
 
   async logs(input: { all?: boolean; role?: AgentRole; tail?: number }): Promise<string> {
-    const targets = await this.resolveTargetAgents({ all: input.all, role: input.role });
+    const runtime = await this.getOrInitializeRuntime();
+    const targets = resolveRuntimeTargets(runtime.agents, { all: input.all, role: input.role });
     const tail = input.tail ?? 200;
 
     const lines: string[] = [];
@@ -183,37 +210,6 @@ export class FleetService {
     }
 
     return lines.join("\n");
-  }
-
-  private async resolveTargetAgents(input: TargetInput): Promise<Roles["agents"]> {
-    const roles = await this.getOrInitializeRoles();
-    if (roles.agents.length === 0) {
-      throw new CodefleetError("ERR_NOT_FOUND", "no agents defined in roles.json");
-    }
-
-    if (input.role) {
-      return roles.agents.filter((agent) => agent.role === input.role);
-    }
-
-    if (input.all || (!input.all && !input.role)) {
-      return roles.agents;
-    }
-
-    throw new CodefleetError("ERR_VALIDATION", "either --all or --role must be specified");
-  }
-
-  private async getOrInitializeRoles(): Promise<Roles> {
-    try {
-      return await this.rolesRepository.get();
-    } catch (error) {
-      if (error instanceof CodefleetError && error.code === "ERR_NOT_FOUND") {
-        const initial: Roles = { agents: [] };
-        await this.rolesRepository.save(initial);
-        return initial;
-      }
-
-      throw error;
-    }
   }
 
   private async getOrInitializeRuntime(): Promise<AgentRuntimeCollection> {
@@ -246,6 +242,53 @@ export class FleetService {
 
       throw error;
     }
+  }
+}
+
+interface TargetAgent {
+  id: string;
+  role: AgentRole;
+}
+
+interface RoleCountInput {
+  gatekeepers: number;
+  developers: number;
+}
+
+function buildTargetAgents(counts: RoleCountInput): TargetAgent[] {
+  validateRoleCount("gatekeepers", counts.gatekeepers);
+  validateRoleCount("developers", counts.developers);
+
+  const targets = [
+    ...buildAgentsByRole("Orchestrator", "orchestrator", FIXED_ORCHESTRATOR_COUNT),
+    ...buildAgentsByRole("Gatekeeper", "gatekeeper", counts.gatekeepers),
+    ...buildAgentsByRole("Developer", "developer", counts.developers),
+  ];
+  return targets;
+}
+
+function buildAgentsByRole(role: AgentRole, idPrefix: string, count: number): TargetAgent[] {
+  return Array.from({ length: count }, (_, index) => ({
+    id: `${idPrefix}-${index + 1}`,
+    role,
+  }));
+}
+
+function resolveRuntimeTargets(runtimeAgents: AgentRuntime[], input: TargetInput): TargetAgent[] {
+  if (input.role) {
+    return runtimeAgents.filter((agent) => agent.role === input.role).map((agent) => ({ id: agent.id, role: agent.role }));
+  }
+
+  if (input.all || (!input.all && !input.role)) {
+    return runtimeAgents.map((agent) => ({ id: agent.id, role: agent.role }));
+  }
+
+  throw new CodefleetError("ERR_VALIDATION", "either --all or --role must be specified");
+}
+
+function validateRoleCount(label: string, value: number): void {
+  if (!Number.isInteger(value) || value < 0) {
+    throw new CodefleetError("ERR_VALIDATION", `${label} must be a non-negative integer`);
   }
 }
 
