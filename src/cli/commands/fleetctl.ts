@@ -8,6 +8,10 @@ import type { AgentRole } from "../../domain/roles-model.js";
 import { FleetService } from "../../domain/agents/fleet-service.js";
 import { AgentEventQueueWorkerService } from "../../domain/events/agent-event-queue-worker-service.js";
 import { AppServerClient } from "../../infra/appserver/app-server-client.js";
+import {
+  formatAgentEventNotificationLog,
+  shouldSuppressNotificationMethod,
+} from "../logging/fleet-agent-event-log.js";
 
 interface FleetctlCommandOptions {
   commandName?: string;
@@ -18,16 +22,25 @@ const DEFAULT_QUEUE_CONSUME_MAX = 50;
 const DEFAULT_QUEUE_POLL_INTERVAL_MS = 1_000;
 
 export function createFleetctlCommand(options: FleetctlCommandOptions = {}): Command {
+  const suppressedEventCountByAgent = new Map<string, number>();
   const appServerClient = new AppServerClient({
     onNotification: (notification) => {
-      emitJsonl({
-        ts: notification.receivedAt,
-        level: "info",
-        event: "fleet.agent.event",
-        agentId: notification.agentId,
-        method: notification.method,
-        params: notification.params ?? null,
-      });
+      if (shouldSuppressNotificationMethod(notification.method)) {
+        suppressedEventCountByAgent.set(
+          notification.agentId,
+          (suppressedEventCountByAgent.get(notification.agentId) ?? 0) + 1,
+        );
+        return;
+      }
+
+      const logRecord = formatAgentEventNotificationLog(notification);
+      const suppressedCount = suppressedEventCountByAgent.get(notification.agentId) ?? 0;
+      if (suppressedCount > 0) {
+        // Keep high-volume stream events out of the main log while preserving observability.
+        logRecord.suppressedEventsSinceLast = suppressedCount;
+        suppressedEventCountByAgent.set(notification.agentId, 0);
+      }
+      emitJsonl(logRecord);
     },
   });
   const service = new FleetService(undefined, undefined, undefined, undefined, appServerClient);
@@ -204,7 +217,7 @@ function emitSessionLog(session: AppServerSession): void {
   });
 }
 
-function emitJsonl(record: Record<string, unknown>): void {
+function emitJsonl(record: object): void {
   console.log(JSON.stringify(record));
 }
 

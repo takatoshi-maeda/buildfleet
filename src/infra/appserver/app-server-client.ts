@@ -61,6 +61,9 @@ type RpcNotificationMessage = {
   params?: Record<string, unknown>;
 };
 
+const AGENT_APPROVAL_POLICY = "never";
+const AGENT_SANDBOX_MODE = "workspace-write";
+
 export class AppServerClient {
   private readonly connections = new Map<string, AppServerConnection>();
 
@@ -69,7 +72,7 @@ export class AppServerClient {
   async startAgent(input: StartAgentInput): Promise<StartAgentResult> {
     // Role-specific prompts are passed through env to preserve a single startup entrypoint while
     // keeping role boot instructions explicit per lifecycle event trigger.
-    const child = spawn("codex", ["app-server"], {
+    const child = spawn("codex", ["-a", "never", "-s", "workspace-write", "app-server"], {
       cwd: input.cwd,
       detached: input.detached,
       stdio: ["pipe", "pipe", "ignore"],
@@ -124,7 +127,11 @@ export class AppServerClient {
 
   async startThread(agentId: string): Promise<{ threadId: string; lastNotificationAt: string }> {
     const connection = this.requireConnection(agentId);
-    const response = await sendRequest(connection, "thread/start", {});
+    // Pin thread execution policy so command/file-change steps run non-interactively in workspace scope.
+    const response = await sendRequest(connection, "thread/start", {
+      approvalPolicy: AGENT_APPROVAL_POLICY,
+      sandbox: AGENT_SANDBOX_MODE,
+    });
     return {
       threadId: parseThreadId(response, "thread/start"),
       lastNotificationAt: connection.lastNotificationAt,
@@ -133,7 +140,12 @@ export class AppServerClient {
 
   async resumeThread(agentId: string, threadId: string): Promise<{ threadId: string; lastNotificationAt: string }> {
     const connection = this.requireConnection(agentId);
-    const response = await sendRequest(connection, "thread/resume", { threadId });
+    // Keep policy consistent when resuming existing threads.
+    const response = await sendRequest(connection, "thread/resume", {
+      threadId,
+      approvalPolicy: AGENT_APPROVAL_POLICY,
+      sandbox: AGENT_SANDBOX_MODE,
+    });
     return {
       threadId: parseThreadId(response, "thread/resume"),
       lastNotificationAt: connection.lastNotificationAt,
