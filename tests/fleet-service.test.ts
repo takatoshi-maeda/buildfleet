@@ -25,7 +25,7 @@ class FakeProcessManager {
 class FakeAppServerClient {
   public started: Array<{ agentId: string; role: AgentRole; prompt: string; detached: boolean }> = [];
   public startedThreads: Array<{ agentId: string }> = [];
-  public startedTurns: Array<{ agentId: string; threadId: string; input: string }> = [];
+  public startedTurns: Array<{ agentId: string; threadId: string; input: Array<{ type: "text"; text: string }> }> = [];
 
   async startAgent(input: {
     agentId: string;
@@ -57,7 +57,10 @@ class FakeAppServerClient {
     };
   }
 
-  async startTurn(inputAgentId: string, input: { threadId: string; input: string }): Promise<{ turnId: string; lastNotificationAt: string }> {
+  async startTurn(
+    inputAgentId: string,
+    input: { threadId: string; input: Array<{ type: "text"; text: string }> },
+  ): Promise<{ turnId: string; lastNotificationAt: string }> {
     this.startedTurns.push({ agentId: inputAgentId, threadId: input.threadId, input: input.input });
     return {
       turnId: `${inputAgentId}-event-turn`,
@@ -153,8 +156,8 @@ describe("FleetService", () => {
       id: "evt-1",
       createdAt: "2026-01-01T00:00:00.000Z",
       agentId: "gatekeeper-1",
+      agentRole: "Gatekeeper",
       event: { type: "docs.update", paths: ["docs/spec.md"] },
-      delivery: { promptFile: "gatekeeper/docs.event.md" },
       source: { command: "codefleet trigger docs.update" },
     });
 
@@ -162,9 +165,12 @@ describe("FleetService", () => {
     expect(appServer.startedTurns).toHaveLength(1);
     expect(appServer.startedTurns[0]?.agentId).toBe("gatekeeper-1");
     expect(appServer.startedTurns[0]?.threadId).toBe("gatekeeper-1-new-thread");
-    expect(appServer.startedTurns[0]?.input).toContain("You are the Gatekeeper processing a `docs.update` event.");
-    expect(appServer.startedTurns[0]?.input).toContain("Changed paths:");
-    expect(appServer.startedTurns[0]?.input).toContain("docs/spec.md");
+    expect(appServer.startedTurns[0]?.input).toHaveLength(1);
+    expect(appServer.startedTurns[0]?.input[0]?.type).toBe("text");
+    expect(appServer.startedTurns[0]?.input[0]?.text).toContain("You are the Gatekeeper.");
+    expect(appServer.startedTurns[0]?.input[0]?.text).toContain("You are the Gatekeeper processing a `docs.update` event.");
+    expect(appServer.startedTurns[0]?.input[0]?.text).toContain("Changed paths:");
+    expect(appServer.startedTurns[0]?.input[0]?.text).toContain("docs/spec.md");
 
     const status = await service.status("Gatekeeper");
     expect(status.sessions[0]?.threadId).toBe("gatekeeper-1-new-thread");

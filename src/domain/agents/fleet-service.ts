@@ -7,12 +7,11 @@ import { CodefleetError } from "../../shared/errors.js";
 import type { SystemEvent } from "../../events/router.js";
 import type { AgentRuntime, AgentRuntimeCollection } from "../agent-runtime-model.js";
 import type { AppServerSession, AppServerSessionCollection } from "../app-server-session-model.js";
-import type { AgentEventDelivery, AgentEventQueueMessage } from "../events/agent-event-queue-message-model.js";
+import type { AgentEventQueueMessage } from "../events/agent-event-queue-message-model.js";
 import type { AgentRole } from "../roles-model.js";
 import { SCHEMA_PATHS } from "../schema-paths.js";
-import { loadEventPrompt } from "./event-prompt-loader.js";
 import { renderEventPromptTemplate } from "./event-prompt-template.js";
-import { getRoleStartupPrompt } from "./role-startup-prompts.js";
+import { getRoleEventPromptTemplate, getRoleStartupPrompt } from "./role-startup-prompts.js";
 
 const DEFAULT_ROLES_PATH = ".codefleet/roles.json";
 const DEFAULT_RUNTIME_DIR = ".codefleet/runtime";
@@ -34,8 +33,8 @@ interface TargetInput {
 
 export interface DispatchAgentEventInput {
   agentId: string;
+  agentRole: AgentRole;
   event: SystemEvent;
-  delivery: AgentEventDelivery;
 }
 
 export class FleetService {
@@ -225,8 +224,8 @@ export class FleetService {
   async dispatchQueuedEvent(message: AgentEventQueueMessage): Promise<void> {
     await this.dispatchAgentEvent({
       agentId: message.agentId,
+      agentRole: message.agentRole,
       event: message.event,
-      delivery: message.delivery,
     });
   }
 
@@ -243,8 +242,11 @@ export class FleetService {
 
     const started = await this.appServerClient.startThread(input.agentId);
     const threadId = started.threadId;
-    const prompt = await this.buildEventPrompt(input.event, input.delivery.promptFile);
-    const turn = await this.appServerClient.startTurn(input.agentId, { threadId, input: prompt });
+    const prompt = await this.buildEventPrompt(input.agentRole, input.event);
+    const turn = await this.appServerClient.startTurn(input.agentId, {
+      threadId,
+      input: [{ type: "text", text: prompt }],
+    });
 
     session.status = "ready";
     session.initialized = true;
@@ -288,13 +290,12 @@ export class FleetService {
     }
   }
 
-  private async buildEventPrompt(event: SystemEvent, promptFile?: string): Promise<string> {
-    const lines = [`event: ${event.type}`, `paths: ${event.paths.join(", ")}`];
-    if (!promptFile) {
-      return lines.join("\n");
+  private async buildEventPrompt(agentRole: AgentRole, event: SystemEvent): Promise<string> {
+    const instructions = await getRoleStartupPrompt(agentRole);
+    const eventPromptTemplate = await getRoleEventPromptTemplate(agentRole, event.type);
+    if (!eventPromptTemplate) {
+      return instructions.trim();
     }
-
-    const eventPromptTemplate = await loadEventPrompt(promptFile);
     const eventParams = event as unknown as Record<string, unknown>;
     const promptContext = {
       ...eventParams,
@@ -302,7 +303,8 @@ export class FleetService {
     };
     // Fail fast on missing template variables so misconfigured event prompts are
     // surfaced during queue handling instead of silently dropping dynamic context.
-    return renderEventPromptTemplate(eventPromptTemplate, promptContext).trim();
+    const renderedEventPrompt = renderEventPromptTemplate(eventPromptTemplate, promptContext).trim();
+    return `${instructions.trim()}\n\n${renderedEventPrompt}`;
   }
 }
 

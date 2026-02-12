@@ -1,15 +1,12 @@
 import type { SystemEvent } from "../../events/router.js";
-
-export interface AgentEventDelivery {
-  promptFile?: string;
-}
+import type { AgentRole } from "../roles-model.js";
 
 export interface AgentEventQueueMessage {
   id: string;
   createdAt: string;
   agentId: string;
+  agentRole: AgentRole;
   event: SystemEvent;
-  delivery: AgentEventDelivery;
   source: {
     command: string;
   };

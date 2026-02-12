@@ -7,6 +7,7 @@ import type { AppServerSession } from "../../domain/app-server-session-model.js"
 import type { AgentRole } from "../../domain/roles-model.js";
 import { FleetService } from "../../domain/agents/fleet-service.js";
 import { AgentEventQueueWorkerService } from "../../domain/events/agent-event-queue-worker-service.js";
+import { AppServerClient } from "../../infra/appserver/app-server-client.js";
 
 interface FleetctlCommandOptions {
   commandName?: string;
@@ -17,7 +18,19 @@ const DEFAULT_QUEUE_CONSUME_MAX = 50;
 const DEFAULT_QUEUE_POLL_INTERVAL_MS = 1_000;
 
 export function createFleetctlCommand(options: FleetctlCommandOptions = {}): Command {
-  const service = new FleetService();
+  const appServerClient = new AppServerClient({
+    onNotification: (notification) => {
+      emitJsonl({
+        ts: notification.receivedAt,
+        level: "info",
+        event: "fleet.agent.event",
+        agentId: notification.agentId,
+        method: notification.method,
+        params: notification.params ?? null,
+      });
+    },
+  });
+  const service = new FleetService(undefined, undefined, undefined, undefined, appServerClient);
   const commandName = options.commandName ?? "fleetctl";
 
   const cmd = new Command(commandName);
@@ -222,12 +235,13 @@ async function waitForShutdownSignal(
         if (result.consumed > 0) {
           emitJsonl({
             ts: new Date().toISOString(),
-            level: "info",
+            level: result.failedFiles.length > 0 ? "warn" : "info",
             event: "fleet.queue.consumed",
             agentId,
             consumed: result.consumed,
             doneCount: result.doneFiles.length,
             failedCount: result.failedFiles.length,
+            failures: result.failures,
           });
         }
       }

@@ -4,7 +4,7 @@ import { atomicWriteJson } from "../../infra/fs/atomic-write.js";
 import type { SystemEvent } from "../../events/router.js";
 import { createUlid } from "../../shared/ulid.js";
 import type { AgentRuntimeCollection } from "../agent-runtime-model.js";
-import { getRoleEventDelivery, isRoleSubscribedToEvent } from "../agents/agent-role-definitions.js";
+import { isRoleSubscribedToEvent } from "../agents/agent-role-definitions.js";
 import type { AgentEventQueueMessage } from "./agent-event-queue-message-model.js";
 
 const DEFAULT_RUNTIME_DIR = ".codefleet/runtime";
@@ -42,8 +42,8 @@ export class AgentEventQueueService {
         id: messageId,
         createdAt,
         agentId: agent.id,
+        agentRole: agent.role,
         event,
-        delivery: getRoleEventDelivery(agent.role, event),
         source: {
           command: "codefleet trigger docs.update",
         },

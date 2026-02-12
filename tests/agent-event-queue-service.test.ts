@@ -60,15 +60,15 @@ describe("AgentEventQueueService", () => {
         JSON.parse(raw) as {
           id: string;
           agentId: string;
+          agentRole: string;
           event: { type: string; paths: string[] };
-          delivery: { promptFile?: string };
         },
     );
 
     expect(messages.map((message) => message.agentId).sort()).toEqual(["gatekeeper-1"]);
+    expect(messages.every((message) => message.agentRole === "Gatekeeper")).toBe(true);
     expect(messages.every((message) => message.event.type === "docs.update")).toBe(true);
     expect(messages.every((message) => message.event.paths[0] === "docs/spec.md")).toBe(true);
-    expect(messages.every((message) => message.delivery.promptFile === "gatekeeper/docs.event.md")).toBe(true);
     expect(messages.every((message) => typeof message.id === "string" && message.id.length === 26)).toBe(true);
   });
 });

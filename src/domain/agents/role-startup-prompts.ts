@@ -3,9 +3,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { CodefleetError } from "../../shared/errors.js";
 import type { AgentRole } from "../roles-model.js";
-import { getAgentRoleDefinition } from "./agent-role-definitions.js";
 
 const promptCache = new Map<AgentRole, string>();
+const eventPromptCache = new Map<string, string | null>();
 
 export async function getRoleStartupPrompt(role: AgentRole): Promise<string> {
   const cached = promptCache.get(role);
@@ -13,8 +13,7 @@ export async function getRoleStartupPrompt(role: AgentRole): Promise<string> {
     return cached;
   }
 
-  const promptFile = getAgentRoleDefinition(role).startupPromptFile;
-  const promptPath = path.join(resolveProjectRoot(), "src/prompts", promptFile);
+  const promptPath = path.join(resolveProjectRoot(), "src/prompts", roleToPromptDir(role), "instructions.md");
   try {
     const prompt = await fs.readFile(promptPath, "utf8");
     promptCache.set(role, prompt);
@@ -22,10 +21,35 @@ export async function getRoleStartupPrompt(role: AgentRole): Promise<string> {
   } catch (error) {
     const err = error as NodeJS.ErrnoException;
     if (err.code === "ENOENT") {
-      throw new CodefleetError("ERR_NOT_FOUND", `startup prompt not found: ${promptPath}`);
+      throw new CodefleetError("ERR_NOT_FOUND", `role instructions not found: ${promptPath}`);
     }
     throw error;
   }
+}
+
+export async function getRoleEventPromptTemplate(role: AgentRole, eventType: string): Promise<string | null> {
+  const cacheKey = `${role}:${eventType}`;
+  if (eventPromptCache.has(cacheKey)) {
+    return eventPromptCache.get(cacheKey) ?? null;
+  }
+
+  const promptPath = path.join(resolveProjectRoot(), "src/prompts", roleToPromptDir(role), "events", `${eventType}.md`);
+  try {
+    const prompt = await fs.readFile(promptPath, "utf8");
+    eventPromptCache.set(cacheKey, prompt);
+    return prompt;
+  } catch (error) {
+    const err = error as NodeJS.ErrnoException;
+    if (err.code === "ENOENT") {
+      eventPromptCache.set(cacheKey, null);
+      return null;
+    }
+    throw error;
+  }
+}
+
+function roleToPromptDir(role: AgentRole): string {
+  return role.toLowerCase();
 }
 
 function resolveProjectRoot(): string {

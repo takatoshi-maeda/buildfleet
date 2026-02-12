@@ -18,6 +18,7 @@ export interface ConsumeAgentQueueResult {
   consumed: number;
   doneFiles: string[];
   failedFiles: string[];
+  failures: Array<{ file: string; reason: string }>;
 }
 
 export class AgentEventQueueWorkerService {
@@ -41,6 +42,7 @@ export class AgentEventQueueWorkerService {
 
     const doneFiles: string[] = [];
     const failedFiles: string[] = [];
+    const failures: Array<{ file: string; reason: string }> = [];
 
     for (const fileName of pendingFiles) {
       const claimed = await this.claimPendingFile(queueDirs.pending, queueDirs.processing, fileName);
@@ -57,10 +59,14 @@ export class AgentEventQueueWorkerService {
         const donePath = path.join(queueDirs.done, fileName);
         await fs.rename(processingPath, donePath);
         doneFiles.push(donePath);
-      } catch {
+      } catch (error) {
         const failedPath = path.join(queueDirs.failed, fileName);
         await fs.rename(processingPath, failedPath);
         failedFiles.push(failedPath);
+        failures.push({
+          file: failedPath,
+          reason: error instanceof Error ? error.message : String(error),
+        });
       }
     }
 
@@ -68,6 +74,7 @@ export class AgentEventQueueWorkerService {
       consumed: doneFiles.length + failedFiles.length,
       doneFiles,
       failedFiles,
+      failures,
     };
   }
 
@@ -112,6 +119,9 @@ async function validateQueueMessage(filePath: string): Promise<AgentEventQueueMe
   if (typeof message.agentId !== "string" || message.agentId.length === 0) {
     throw new Error("queue message.agentId must be a non-empty string");
   }
+  if (message.agentRole !== "Orchestrator" && message.agentRole !== "Developer" && message.agentRole !== "Gatekeeper") {
+    throw new Error("queue message.agentRole must be a valid AgentRole");
+  }
   if (
     !message.event ||
     typeof message.event.type !== "string" ||
@@ -119,15 +129,6 @@ async function validateQueueMessage(filePath: string): Promise<AgentEventQueueMe
     !message.event.paths.every((entry) => typeof entry === "string")
   ) {
     throw new Error("queue message.event must include type and string paths");
-  }
-  if (!message.delivery || typeof message.delivery !== "object") {
-    throw new Error("queue message.delivery must be an object");
-  }
-  if (
-    message.delivery.promptFile !== undefined &&
-    (typeof message.delivery.promptFile !== "string" || message.delivery.promptFile.length === 0)
-  ) {
-    throw new Error("queue message.delivery.promptFile must be a non-empty string when provided");
   }
 
   return message as AgentEventQueueMessage;

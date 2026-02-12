@@ -17,8 +17,8 @@ describe("AgentEventQueueWorkerService", () => {
         id: "1",
         createdAt: "2026-01-01T00:00:00.000Z",
         agentId: "developer-1",
+        agentRole: "Developer",
         event: { type: "docs.update", paths: ["docs/a.md"] },
-        delivery: {},
         source: { command: "codefleet trigger docs.update" },
       })}\n`,
       "utf8",
@@ -31,6 +31,8 @@ describe("AgentEventQueueWorkerService", () => {
     expect(result.consumed).toBe(2);
     expect(result.doneFiles).toHaveLength(1);
     expect(result.failedFiles).toHaveLength(1);
+    expect(result.failures).toHaveLength(1);
+    expect(result.failures[0]?.reason.length).toBeGreaterThan(0);
 
     await expect(fs.stat(result.doneFiles[0])).resolves.toBeDefined();
     await expect(fs.stat(result.failedFiles[0])).resolves.toBeDefined();
@@ -48,8 +50,8 @@ describe("AgentEventQueueWorkerService", () => {
         id: "1",
         createdAt: "2026-01-01T00:00:00.000Z",
         agentId: "gatekeeper-1",
+        agentRole: "Gatekeeper",
         event: { type: "docs.update", paths: ["docs/a.md"] },
-        delivery: { promptFile: "gatekeeper/docs.event.md" },
         source: { command: "codefleet trigger docs.update" },
       })}\n`,
       "utf8",
@@ -68,5 +70,10 @@ describe("AgentEventQueueWorkerService", () => {
     expect(result.consumed).toBe(1);
     expect(result.doneFiles).toHaveLength(0);
     expect(result.failedFiles).toHaveLength(1);
+    expect(result.failures).toEqual([
+      expect.objectContaining({
+        reason: "injected failure",
+      }),
+    ]);
   });
 });

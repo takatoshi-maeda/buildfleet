@@ -20,7 +20,18 @@ export interface StartAgentResult {
 
 export interface StartTurnInput {
   threadId: string;
-  input: string;
+  input: Array<{ type: "text"; text: string }>;
+}
+
+export interface AppServerNotification {
+  agentId: string;
+  method: string;
+  params?: Record<string, unknown>;
+  receivedAt: string;
+}
+
+export interface AppServerClientOptions {
+  onNotification?: (notification: AppServerNotification) => void;
 }
 
 interface PendingResponse {
@@ -53,6 +64,8 @@ type RpcNotificationMessage = {
 export class AppServerClient {
   private readonly connections = new Map<string, AppServerConnection>();
 
+  constructor(private readonly options: AppServerClientOptions = {}) {}
+
   async startAgent(input: StartAgentInput): Promise<StartAgentResult> {
     // Role-specific prompts are passed through env to preserve a single startup entrypoint while
     // keeping role boot instructions explicit per lifecycle event trigger.
@@ -78,7 +91,7 @@ export class AppServerClient {
       lastNotificationAt: new Date().toISOString(),
     };
     this.connections.set(input.agentId, connection);
-    wireConnectionLifecycle(connection, this.connections);
+    wireConnectionLifecycle(connection, this.connections, this.options.onNotification);
 
     if (input.detached) {
       child.unref();
@@ -151,6 +164,7 @@ export class AppServerClient {
 function wireConnectionLifecycle(
   connection: AppServerConnection,
   connectionsByAgentId: Map<string, AppServerConnection>,
+  onNotification?: (notification: AppServerNotification) => void,
 ): void {
   connection.reader.on("line", (line) => {
     const parsed = parseRpcLine(line);
@@ -172,6 +186,12 @@ function wireConnectionLifecycle(
     }
 
     if ("method" in parsed) {
+      onNotification?.({
+        agentId: connection.agentId,
+        method: parsed.method,
+        params: parsed.params,
+        receivedAt: connection.lastNotificationAt,
+      });
       return;
     }
   });
