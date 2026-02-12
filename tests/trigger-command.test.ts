@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createTriggerCommand } from "../src/cli/commands/trigger.js";
 import type { RouteResult, SystemEvent } from "../src/events/router.js";
+import type { AgentEventQueueEnqueueResult } from "../src/domain/events/agent-event-queue-service.js";
 
 class RecordingRouter {
   public events: SystemEvent[] = [];
@@ -8,6 +9,15 @@ class RecordingRouter {
   async route(event: SystemEvent): Promise<RouteResult> {
     this.events.push(event);
     return { deduped: false, executions: [] };
+  }
+}
+
+class RecordingQueue {
+  public events: SystemEvent[] = [];
+
+  async enqueueToRunningAgents(event: SystemEvent): Promise<AgentEventQueueEnqueueResult> {
+    this.events.push(event);
+    return { enqueuedAgentIds: ["developer-1"], files: [".codefleet/runtime/events/agents/developer-1/pending/a.json"] };
   }
 }
 
@@ -57,9 +67,10 @@ describe("trigger command", () => {
 
   it("builds docs.update event from --paths option values", async () => {
     const router = new RecordingRouter();
+    const queue = new RecordingQueue();
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
 
-    await createTriggerCommand({ router }).parseAsync(
+    await createTriggerCommand({ router, queue }).parseAsync(
       ["docs.update", "--paths", "docs/a.md,docs/b.md", "--paths", "docs/c.md"],
       { from: "user" },
     );
@@ -70,12 +81,18 @@ describe("trigger command", () => {
         paths: ["docs/a.md", "docs/b.md", "docs/c.md"],
       },
     ]);
+    expect(queue.events).toEqual([
+      {
+        type: "docs.update",
+        paths: ["docs/a.md", "docs/b.md", "docs/c.md"],
+      },
+    ]);
     expect(logSpy).toHaveBeenCalled();
   });
 
   it("rejects unknown event subcommand", async () => {
     const router = new RecordingRouter();
-    const command = createTriggerCommand({ router }).exitOverride();
+    const command = createTriggerCommand({ router, queue: new RecordingQueue() }).exitOverride();
 
     await expect(
       command.parseAsync(["manual.triggered", "--actor", "Developer"], { from: "user" }),

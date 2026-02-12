@@ -5,13 +5,19 @@ import {
   type RouteResult,
   type SystemEvent,
 } from "../../events/router.js";
+import {
+  AgentEventQueueService,
+  type AgentEventQueueEnqueueResult,
+} from "../../domain/events/agent-event-queue-service.js";
 
 interface TriggerCommandOptions {
   router?: Pick<EventRouter, "route">;
+  queue?: Pick<AgentEventQueueService, "enqueueToRunningAgents">;
 }
 
 export function createTriggerCommand(options: TriggerCommandOptions = {}): Command {
   const router = options.router ?? new EventRouter(createCodefleetCommandDispatcher());
+  const queue = options.queue ?? new AgentEventQueueService();
 
   const cmd = new Command("trigger");
   cmd.description("Trigger a system event manually");
@@ -31,22 +37,28 @@ export function createTriggerCommand(options: TriggerCommandOptions = {}): Comma
       if (paths.length === 0) {
         throw new Error("docs.update: --paths must include at least one path");
       }
-      await executeRoute(router, { type: "docs.update", paths });
+      await executeRoute(router, queue, { type: "docs.update", paths });
     });
 
   return cmd;
 }
 
-async function executeRoute(router: Pick<EventRouter, "route">, event: SystemEvent): Promise<void> {
+async function executeRoute(
+  router: Pick<EventRouter, "route">,
+  queue: Pick<AgentEventQueueService, "enqueueToRunningAgents">,
+  event: SystemEvent,
+): Promise<void> {
+  const enqueueResult = await queue.enqueueToRunningAgents(event);
   const result = await router.route(event);
-  printRouteResult(event, result);
+  printRouteResult(event, result, enqueueResult);
 }
 
-function printRouteResult(event: SystemEvent, result: RouteResult): void {
+function printRouteResult(event: SystemEvent, result: RouteResult, enqueueResult: AgentEventQueueEnqueueResult): void {
   console.log(
     JSON.stringify(
       {
         event,
+        queue: enqueueResult,
         deduped: result.deduped,
         executions: result.executions,
       },
