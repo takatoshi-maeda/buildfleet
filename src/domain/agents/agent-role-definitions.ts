@@ -24,7 +24,7 @@ const AGENT_ROLE_DEFINITIONS: Record<AgentRole, AgentRoleDefinition> = {
     role: "Orchestrator",
     subscribedEvents: {
       "acceptance-test.update": {
-        triggerEvent: "acceptance-test.update",
+        triggerEvent: "backlog.update",
       },
     },
   },

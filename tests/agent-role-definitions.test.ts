@@ -15,6 +15,7 @@ describe("agent-role-definitions", () => {
     expect(isRoleSubscribedToEvent("Developer", { type: "docs.update", paths: ["docs/a.md"] })).toBe(false);
     expect(isRoleSubscribedToEvent("Developer", { type: "acceptance-test.update", paths: ["docs/a.md"] })).toBe(false);
     expect(isRoleSubscribedToEvent("Orchestrator", { type: "acceptance-test.update", paths: ["docs/a.md"] })).toBe(true);
+    expect(isRoleSubscribedToEvent("Orchestrator", { type: "backlog.update", paths: ["docs/a.md"] })).toBe(false);
     expect(isRoleSubscribedToEvent("Gatekeeper", { type: "docs.update", paths: ["docs/a.md"] })).toBe(true);
   });
 
@@ -25,6 +26,9 @@ describe("agent-role-definitions", () => {
 
     const gatekeeperPrompt = getRoleEventPromptDefinition("Gatekeeper", "docs.update");
     expect(gatekeeperPrompt.promptEventType).toBe("acceptance-test.update");
+
+    const orchestratorPrompt = getRoleEventPromptDefinition("Orchestrator", "acceptance-test.update");
+    expect(orchestratorPrompt.promptEventType).toBe("backlog.update");
 
     const defaultPrompt = getRoleEventPromptDefinition("Developer", "docs.update");
     expect(defaultPrompt.promptEventType).toBe("docs.update");

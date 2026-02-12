@@ -217,4 +217,28 @@ describe("FleetService", () => {
     });
     expect(emittedEvent).toBeNull();
   });
+
+  it("emits backlog.update after orchestrator handles acceptance-test.update", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codefleet-fleet-"));
+    const rolesPath = path.join(tempDir, ".codefleet/roles.json");
+    const runtimeDir = path.join(tempDir, ".codefleet/runtime");
+    const logDir = path.join(tempDir, ".codefleet/logs/agents");
+    const appServer = new FakeAppServerClient();
+    const service = new FleetService(
+      rolesPath,
+      runtimeDir,
+      logDir,
+      new FakeProcessManager() as never,
+      appServer as never,
+    );
+
+    await service.up();
+    const emittedEvent = await service.dispatchAgentEvent({
+      agentId: "orchestrator-1",
+      agentRole: "Orchestrator",
+      event: { type: "acceptance-test.update", paths: ["docs/spec.md"] },
+    });
+
+    expect(emittedEvent).toEqual({ type: "backlog.update", paths: ["docs/spec.md"] });
+  });
 });
