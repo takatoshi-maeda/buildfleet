@@ -1,8 +1,8 @@
-import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { atomicWriteJson } from "../../infra/fs/atomic-write.js";
 import type { SystemEvent } from "../../events/router.js";
+import { createUlid } from "../../shared/ulid.js";
 import type { AgentRuntimeCollection } from "../agent-runtime-model.js";
 import { isRoleSubscribedToEvent } from "../agents/agent-role-definitions.js";
 
@@ -40,13 +40,13 @@ export class AgentEventQueueService {
 
     // A per-agent spool keeps consumption independent and removes cross-agent lock contention.
     for (const agentId of runningAgentIds) {
-      const messageId = randomUUID();
+      const messageId = createUlid();
       const queueFilePath = path.join(
         this.runtimeDir,
         EVENT_QUEUE_ROOT,
         agentId,
         "pending",
-        `${Date.now()}-${messageId}.json`,
+        `${messageId}.json`,
       );
       const message: AgentEventQueueMessage = {
         id: messageId,

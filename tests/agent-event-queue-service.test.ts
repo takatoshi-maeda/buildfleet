@@ -52,6 +52,7 @@ describe("AgentEventQueueService", () => {
 
     expect(result.enqueuedAgentIds).toEqual(["gatekeeper-1"]);
     expect(result.files).toHaveLength(1);
+    expect(path.basename(result.files[0] ?? "")).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}\.json$/u);
 
     const messageFiles = await Promise.all(result.files.map((filePath) => fs.readFile(filePath, "utf8")));
     const messages = messageFiles.map((raw) => JSON.parse(raw) as { agentId: string; event: { type: string; paths: string[] } });
@@ -59,5 +60,6 @@ describe("AgentEventQueueService", () => {
     expect(messages.map((message) => message.agentId).sort()).toEqual(["gatekeeper-1"]);
     expect(messages.every((message) => message.event.type === "docs.update")).toBe(true);
     expect(messages.every((message) => message.event.paths[0] === "docs/spec.md")).toBe(true);
+    expect(messages.every((message) => typeof message.id === "string" && message.id.length === 26)).toBe(true);
   });
 });
