@@ -26,6 +26,7 @@ class FakeAppServerClient {
   public started: Array<{ agentId: string; role: AgentRole; prompt: string; detached: boolean }> = [];
   public startedThreads: Array<{ agentId: string; baseInstructions?: string }> = [];
   public startedTurns: Array<{ agentId: string; threadId: string; input: Array<{ type: "text"; text: string }> }> = [];
+  public completedTurns: Array<{ agentId: string; threadId: string; turnId: string }> = [];
 
   async startAgent(input: {
     agentId: string;
@@ -69,6 +70,10 @@ class FakeAppServerClient {
       turnId: `${inputAgentId}-event-turn`,
       lastNotificationAt: "2026-01-01T00:00:04.000Z",
     };
+  }
+
+  async waitForTurnCompletion(agentId: string, threadId: string, turnId: string): Promise<void> {
+    this.completedTurns.push({ agentId, threadId, turnId });
   }
 }
 
@@ -155,13 +160,17 @@ describe("FleetService", () => {
     );
 
     await service.up({ lang: "日本語" });
-    await service.dispatchQueuedEvent({
+    const emittedEvent = await service.dispatchQueuedEvent({
       id: "evt-1",
       createdAt: "2026-01-01T00:00:00.000Z",
       agentId: "gatekeeper-1",
       agentRole: "Gatekeeper",
       event: { type: "docs.update", paths: ["docs/spec.md"] },
       source: { command: "codefleet trigger docs.update" },
+    });
+    expect(emittedEvent).toEqual({
+      type: "acceptance-test.update",
+      paths: ["docs/spec.md"],
     });
 
     expect(appServer.startedThreads).toEqual([
@@ -177,9 +186,35 @@ describe("FleetService", () => {
     expect(appServer.startedTurns[0]?.input[0]?.text).toContain("acceptance-test.update.md");
     expect(appServer.startedTurns[0]?.input[0]?.text).toContain("Changed paths:");
     expect(appServer.startedTurns[0]?.input[0]?.text).toContain("docs/spec.md");
+    expect(appServer.completedTurns).toEqual([
+      { agentId: "gatekeeper-1", threadId: "gatekeeper-1-new-thread", turnId: "gatekeeper-1-event-turn" },
+    ]);
 
     const status = await service.status("Gatekeeper");
     expect(status.sessions[0]?.threadId).toBe("gatekeeper-1-new-thread");
     expect(status.sessions[0]?.activeTurnId).toBe("gatekeeper-1-event-turn");
+  });
+
+  it("does not emit a follow-up event when event mapping does not change type", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codefleet-fleet-"));
+    const rolesPath = path.join(tempDir, ".codefleet/roles.json");
+    const runtimeDir = path.join(tempDir, ".codefleet/runtime");
+    const logDir = path.join(tempDir, ".codefleet/logs/agents");
+    const appServer = new FakeAppServerClient();
+    const service = new FleetService(
+      rolesPath,
+      runtimeDir,
+      logDir,
+      new FakeProcessManager() as never,
+      appServer as never,
+    );
+
+    await service.up();
+    const emittedEvent = await service.dispatchAgentEvent({
+      agentId: "developer-1",
+      agentRole: "Developer",
+      event: { type: "acceptance-test.update", paths: ["docs/spec.md"] },
+    });
+    expect(emittedEvent).toBeNull();
   });
 });

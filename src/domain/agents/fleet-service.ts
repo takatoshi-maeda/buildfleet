@@ -225,15 +225,15 @@ export class FleetService {
     return lines.join("\n");
   }
 
-  async dispatchQueuedEvent(message: AgentEventQueueMessage): Promise<void> {
-    await this.dispatchAgentEvent({
+  async dispatchQueuedEvent(message: AgentEventQueueMessage): Promise<SystemEvent | null> {
+    return this.dispatchAgentEvent({
       agentId: message.agentId,
       agentRole: message.agentRole,
       event: message.event,
     });
   }
 
-  async dispatchAgentEvent(input: DispatchAgentEventInput): Promise<void> {
+  async dispatchAgentEvent(input: DispatchAgentEventInput): Promise<SystemEvent | null> {
     const sessions = await this.getOrInitializeSessions();
     const session = upsertSession(sessions, {
       agentId: input.agentId,
@@ -253,6 +253,9 @@ export class FleetService {
       threadId,
       input: [{ type: "text", text: prompt }],
     });
+    if (turn.turnId) {
+      await this.appServerClient.waitForTurnCompletion(input.agentId, threadId, turn.turnId);
+    }
 
     session.status = "ready";
     session.initialized = true;
@@ -262,6 +265,16 @@ export class FleetService {
     session.lastError = undefined;
     sessions.updatedAt = new Date().toISOString();
     await this.sessionRepository.save(sessions);
+
+    const eventPromptDefinition = getRoleEventPromptDefinition(input.agentRole, input.event.type);
+    // Re-emitting the same event type by default can create infinite self-trigger loops.
+    if (eventPromptDefinition.promptEventType === input.event.type) {
+      return null;
+    }
+    return {
+      type: eventPromptDefinition.promptEventType,
+      paths: [...input.event.paths],
+    };
   }
 
   private async getOrInitializeRuntime(): Promise<AgentRuntimeCollection> {

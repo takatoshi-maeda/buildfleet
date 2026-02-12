@@ -3,11 +3,11 @@ import type { AgentRole } from "../roles-model.js";
 
 export interface RoleEventPromptDefinition {
   triggerEventType: SystemEvent["type"];
-  promptEventType: string;
+  promptEventType: SystemEvent["type"];
 }
 
 export interface SubscribedEventDefinition {
-  triggerEvent: string;
+  triggerEvent: SystemEvent["type"];
 }
 
 export interface AgentRoleDefinition {
@@ -22,7 +22,11 @@ export interface AgentRoleDefinition {
 const AGENT_ROLE_DEFINITIONS: Record<AgentRole, AgentRoleDefinition> = {
   Orchestrator: {
     role: "Orchestrator",
-    subscribedEvents: {},
+    subscribedEvents: {
+      "acceptance-test.update": {
+        triggerEvent: "acceptance-test.update",
+      },
+    },
   },
   Developer: {
     role: "Developer",

@@ -44,12 +44,21 @@ interface PendingResponse {
   timer: NodeJS.Timeout;
 }
 
+interface PendingTurnCompletion {
+  resolve: () => void;
+  reject: (error: Error) => void;
+  timer: NodeJS.Timeout;
+}
+
 interface AppServerConnection {
   agentId: string;
   startupPrompt: string;
   child: ChildProcessByStdio<Writable, Readable, null>;
   reader: readline.Interface;
   pending: Map<number, PendingResponse>;
+  pendingTurnCompletions: Map<string, PendingTurnCompletion[]>;
+  completedTurnKeys: string[];
+  completedTurnKeySet: Set<string>;
   nextRequestId: number;
   lastNotificationAt: string;
 }
@@ -67,6 +76,8 @@ type RpcNotificationMessage = {
 
 const AGENT_APPROVAL_POLICY = "never";
 const AGENT_SANDBOX_MODE = "workspace-write";
+const TURN_COMPLETION_TIMEOUT_MS = 30 * 60 * 1000;
+const MAX_COMPLETED_TURN_CACHE = 256;
 
 export class AppServerClient {
   private readonly connections = new Map<string, AppServerConnection>();
@@ -94,6 +105,9 @@ export class AppServerClient {
       child,
       reader,
       pending: new Map(),
+      pendingTurnCompletions: new Map(),
+      completedTurnKeys: [],
+      completedTurnKeySet: new Set(),
       nextRequestId: 1,
       lastNotificationAt: new Date().toISOString(),
     };
@@ -169,6 +183,34 @@ export class AppServerClient {
     };
   }
 
+  async waitForTurnCompletion(agentId: string, threadId: string, turnId: string): Promise<void> {
+    const connection = this.requireConnection(agentId);
+    const turnKey = `${threadId}:${turnId}`;
+    if (connection.completedTurnKeySet.has(turnKey)) {
+      return;
+    }
+
+    await new Promise<void>((resolve, reject) => {
+      const pending = connection.pendingTurnCompletions.get(turnKey) ?? [];
+      const timer = setTimeout(() => {
+        const remaining = (connection.pendingTurnCompletions.get(turnKey) ?? []).filter((entry) => entry !== waiter);
+        if (remaining.length > 0) {
+          connection.pendingTurnCompletions.set(turnKey, remaining);
+        } else {
+          connection.pendingTurnCompletions.delete(turnKey);
+        }
+        reject(new CodefleetError("ERR_UNEXPECTED", `app-server turn timed out: ${turnKey}`));
+      }, TURN_COMPLETION_TIMEOUT_MS);
+      const waiter: PendingTurnCompletion = {
+        resolve,
+        reject,
+        timer,
+      };
+      pending.push(waiter);
+      connection.pendingTurnCompletions.set(turnKey, pending);
+    });
+  }
+
   private requireConnection(agentId: string): AppServerConnection {
     const connection = this.connections.get(agentId);
     if (!connection) {
@@ -203,6 +245,12 @@ function wireConnectionLifecycle(
     }
 
     if ("method" in parsed) {
+      if (parsed.method === "turn/completed") {
+        const turnKey = parseTurnCompletionKey(parsed.params);
+        if (turnKey) {
+          markTurnCompleted(connection, turnKey);
+        }
+      }
       onNotification?.({
         agentId: connection.agentId,
         method: parsed.method,
@@ -218,7 +266,14 @@ function wireConnectionLifecycle(
       clearTimeout(pending.timer);
       pending.reject(new CodefleetError("ERR_UNEXPECTED", message));
     }
+    for (const waiters of connection.pendingTurnCompletions.values()) {
+      for (const waiter of waiters) {
+        clearTimeout(waiter.timer);
+        waiter.reject(new CodefleetError("ERR_UNEXPECTED", message));
+      }
+    }
     connection.pending.clear();
+    connection.pendingTurnCompletions.clear();
     connection.reader.close();
     connectionsByAgentId.delete(connection.agentId);
   };
@@ -294,4 +349,37 @@ function parseThreadId(response: RpcResponseMessage, method: string): string {
 function parseTurnId(response: RpcResponseMessage): string | null {
   const turn = response.result?.turn as { id?: unknown } | undefined;
   return typeof turn?.id === "string" && turn.id.length > 0 ? turn.id : null;
+}
+
+function parseTurnCompletionKey(params: Record<string, unknown> | undefined): string | null {
+  const threadId = typeof params?.threadId === "string" ? params.threadId : null;
+  const turn = params?.turn as { id?: unknown } | undefined;
+  const turnId = typeof turn?.id === "string" ? turn.id : null;
+  if (!threadId || !turnId) {
+    return null;
+  }
+  return `${threadId}:${turnId}`;
+}
+
+function markTurnCompleted(connection: AppServerConnection, turnKey: string): void {
+  if (!connection.completedTurnKeySet.has(turnKey)) {
+    connection.completedTurnKeySet.add(turnKey);
+    connection.completedTurnKeys.push(turnKey);
+    if (connection.completedTurnKeys.length > MAX_COMPLETED_TURN_CACHE) {
+      const evicted = connection.completedTurnKeys.shift();
+      if (evicted) {
+        connection.completedTurnKeySet.delete(evicted);
+      }
+    }
+  }
+
+  const waiters = connection.pendingTurnCompletions.get(turnKey);
+  if (!waiters) {
+    return;
+  }
+  connection.pendingTurnCompletions.delete(turnKey);
+  for (const waiter of waiters) {
+    clearTimeout(waiter.timer);
+    waiter.resolve();
+  }
 }

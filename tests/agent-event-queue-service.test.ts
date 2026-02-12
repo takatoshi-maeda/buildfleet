@@ -62,6 +62,7 @@ describe("AgentEventQueueService", () => {
           agentId: string;
           agentRole: string;
           event: { type: string; paths: string[] };
+          source: { command: string };
         },
     );
 
@@ -69,6 +70,46 @@ describe("AgentEventQueueService", () => {
     expect(messages.every((message) => message.agentRole === "Gatekeeper")).toBe(true);
     expect(messages.every((message) => message.event.type === "docs.update")).toBe(true);
     expect(messages.every((message) => message.event.paths[0] === "docs/spec.md")).toBe(true);
+    expect(messages.every((message) => message.source.command === "codefleet trigger docs.update")).toBe(true);
     expect(messages.every((message) => typeof message.id === "string" && message.id.length === 26)).toBe(true);
+  });
+
+  it("enqueues acceptance-test.update messages for running orchestrator", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codefleet-event-queue-"));
+    const runtimeDir = path.join(tempDir, ".codefleet", "runtime");
+    await fs.mkdir(runtimeDir, { recursive: true });
+
+    const runtimes: AgentRuntimeCollection = {
+      version: 1,
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      agents: [
+        {
+          id: "orchestrator-1",
+          role: "Orchestrator",
+          status: "running",
+          pid: 111,
+          cwd: tempDir,
+          startedAt: "2026-01-01T00:00:00.000Z",
+          lastHeartbeatAt: "2026-01-01T00:00:00.000Z",
+        },
+        {
+          id: "gatekeeper-1",
+          role: "Gatekeeper",
+          status: "running",
+          pid: 333,
+          cwd: tempDir,
+          startedAt: "2026-01-01T00:00:00.000Z",
+          lastHeartbeatAt: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+    };
+
+    await fs.writeFile(path.join(runtimeDir, "agents.json"), `${JSON.stringify(runtimes, null, 2)}\n`, "utf8");
+
+    const service = new AgentEventQueueService(runtimeDir);
+    const result = await service.enqueueToRunningAgents({ type: "acceptance-test.update", paths: ["docs/spec.md"] });
+
+    expect(result.enqueuedAgentIds).toEqual(["orchestrator-1"]);
+    expect(result.files).toHaveLength(1);
   });
 });

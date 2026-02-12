@@ -1,7 +1,8 @@
 import { spawn } from "node:child_process";
 
 export type SystemEvent =
-  | { type: "docs.update"; paths: string[] };
+  | { type: "docs.update"; paths: string[] }
+  | { type: "acceptance-test.update"; paths: string[] };
 
 export interface CommandExecution {
   executable: string;

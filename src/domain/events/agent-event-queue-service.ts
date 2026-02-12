@@ -45,7 +45,7 @@ export class AgentEventQueueService {
         agentRole: agent.role,
         event,
         source: {
-          command: "codefleet trigger docs.update",
+          command: `codefleet trigger ${event.type}`,
         },
       };
       await atomicWriteJson(queueFilePath, message);

@@ -13,6 +13,8 @@ describe("agent-role-definitions", () => {
 
     expect(isRoleSubscribedToEvent("Orchestrator", { type: "docs.update", paths: ["docs/a.md"] })).toBe(false);
     expect(isRoleSubscribedToEvent("Developer", { type: "docs.update", paths: ["docs/a.md"] })).toBe(false);
+    expect(isRoleSubscribedToEvent("Developer", { type: "acceptance-test.update", paths: ["docs/a.md"] })).toBe(false);
+    expect(isRoleSubscribedToEvent("Orchestrator", { type: "acceptance-test.update", paths: ["docs/a.md"] })).toBe(true);
     expect(isRoleSubscribedToEvent("Gatekeeper", { type: "docs.update", paths: ["docs/a.md"] })).toBe(true);
   });
 

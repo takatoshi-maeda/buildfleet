@@ -6,6 +6,7 @@ import type { AgentRuntime } from "../../domain/agent-runtime-model.js";
 import type { AppServerSession } from "../../domain/app-server-session-model.js";
 import type { AgentRole } from "../../domain/roles-model.js";
 import { FleetService } from "../../domain/agents/fleet-service.js";
+import { AgentEventQueueService } from "../../domain/events/agent-event-queue-service.js";
 import { AgentEventQueueWorkerService } from "../../domain/events/agent-event-queue-worker-service.js";
 import { AppServerClient } from "../../infra/appserver/app-server-client.js";
 import {
@@ -158,9 +159,10 @@ export function createFleetctlCommand(options: FleetctlCommandOptions = {}): Com
       });
 
       const queueWorker = new AgentEventQueueWorkerService();
+      const queueService = new AgentEventQueueService();
       await writeSupervisorPid(process.pid);
       try {
-        await waitForShutdownSignal(service, queueWorker, emit);
+        await waitForShutdownSignal(service, queueWorker, queueService, emit);
       } finally {
         await removeSupervisorPidFile();
       }
@@ -270,6 +272,7 @@ function emitLog(record: object, mode: LogMode): void {
 async function waitForShutdownSignal(
   service: FleetService,
   queueWorker: Pick<AgentEventQueueWorkerService, "consume">,
+  queueService: Pick<AgentEventQueueService, "enqueueToRunningAgents">,
   emit: (record: object) => void,
 ): Promise<void> {
   let polling = true;
@@ -290,7 +293,24 @@ async function waitForShutdownSignal(
       for (const agentId of runningAgentIds) {
         const result = await queueWorker.consume(
           { agentId, maxMessages: DEFAULT_QUEUE_CONSUME_MAX },
-          { onMessage: async (message) => service.dispatchQueuedEvent(message) },
+          {
+            onMessage: async (message) => {
+              const emittedEvent = await service.dispatchQueuedEvent(message);
+              if (!emittedEvent) {
+                return;
+              }
+              const enqueueResult = await queueService.enqueueToRunningAgents(emittedEvent);
+              emit({
+                ts: new Date().toISOString(),
+                level: "info",
+                event: "fleet.event.emitted",
+                agentId: message.agentId,
+                sourceEventType: message.event.type,
+                emittedEventType: emittedEvent.type,
+                enqueuedAgentIds: enqueueResult.enqueuedAgentIds,
+              });
+            },
+          },
         );
         if (result.consumed > 0) {
           emit({
