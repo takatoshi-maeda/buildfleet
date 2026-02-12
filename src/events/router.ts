@@ -5,7 +5,8 @@ export type SystemEvent =
   | { type: "git.main.updated"; commit: string }
   | { type: "acceptance.result.created"; path: string }
   | { type: "backlog.poll.tick"; actor: "Developer" | "Gatekeeper"; at: string }
-  | { type: "fleet.lifecycle.changed"; status: "starting" | "running" | "stopped" | "degraded" };
+  | { type: "fleet.lifecycle.changed"; status: "starting" | "running" | "stopped" | "degraded" }
+  | { type: "docs.update"; paths: string[] };
 
 export interface CommandExecution {
   executable: string;
@@ -90,6 +91,8 @@ export class EventRouter {
         return [{ executable: "codefleet-backlog", args: ["list", "--status", "wait-implementation"] }];
       case "fleet.lifecycle.changed":
         return [{ executable: "codefleet", args: ["status"] }];
+      case "docs.update":
+        return [{ executable: "codefleet-acceptance-test", args: ["list"] }];
       default: {
         const neverEvent: never = event;
         throw new Error(`unsupported event: ${JSON.stringify(neverEvent)}`);
@@ -109,6 +112,9 @@ export class EventRouter {
         return `${event.type}:${event.actor}:${event.at}`;
       case "fleet.lifecycle.changed":
         return `${event.type}:${event.status}`;
+      case "docs.update":
+        // Order-independent key avoids duplicate processing when the same path set arrives in a different order.
+        return `${event.type}:${[...event.paths].sort().join("|")}`;
       default: {
         const neverEvent: never = event;
         throw new Error(`unsupported event: ${JSON.stringify(neverEvent)}`);

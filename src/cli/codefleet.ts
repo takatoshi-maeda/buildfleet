@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { createFleetctlCommand } from "./commands/fleetctl.js";
 import { createInitCommand } from "./commands/init.js";
+import { createTriggerCommand } from "./commands/trigger.js";
 
 export function createCodefleetCli() {
   const program = createFleetctlCommand({ commandName: "codefleet" });
@@ -10,6 +11,7 @@ export function createCodefleetCli() {
     .version("0.1.0");
 
   program.addCommand(createInitCommand());
+  program.addCommand(createTriggerCommand());
 
   return program;
 }

@@ -19,6 +19,7 @@ describe("EventRouter", () => {
     await router.route({ type: "acceptance.result.created", path: "/tmp/ATR-1.json" });
     await router.route({ type: "backlog.poll.tick", actor: "Developer", at: "2026-01-01T00:00:00.000Z" });
     await router.route({ type: "fleet.lifecycle.changed", status: "running" });
+    await router.route({ type: "docs.update", paths: ["docs/requirements.md", "docs/backlog.md"] });
 
     expect(dispatcher.executions).toEqual([
       { executable: "codefleet-acceptance-test", args: ["list"] },
@@ -26,6 +27,7 @@ describe("EventRouter", () => {
       { executable: "codefleet-backlog", args: ["list"] },
       { executable: "codefleet-backlog", args: ["list", "--status", "wait-implementation"] },
       { executable: "codefleet", args: ["status"] },
+      { executable: "codefleet-acceptance-test", args: ["list"] },
     ]);
   });
 
