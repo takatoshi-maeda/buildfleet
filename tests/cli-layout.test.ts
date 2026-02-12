@@ -49,6 +49,7 @@ describe("CLI command layout", () => {
     expect(output).toContain("codefleet-acceptance-test [options] [command]");
     expect(output).toContain("result");
     expect(output).toContain("list");
+    expect(output).toContain("clear");
   });
 
   it("exposes backlog as standalone binary", async () => {

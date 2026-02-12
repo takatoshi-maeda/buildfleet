@@ -1,4 +1,5 @@
 import { Command } from "commander";
+import { createInterface } from "node:readline/promises";
 import type {
   AcceptanceTestCaseStatus,
   AcceptanceTestExecutionStatus,
@@ -9,6 +10,8 @@ interface AcceptanceTestCommandOptions {
   commandName?: string;
   executableName?: string;
 }
+
+type ListOutputFormat = "json" | "table";
 
 export function createAcceptanceTestCommand(options: AcceptanceTestCommandOptions = {}): Command {
   const service = new AcceptanceTestService();
@@ -31,8 +34,13 @@ export function createAcceptanceTestCommand(options: AcceptanceTestCommandOption
   cmd
     .command("list")
     .description("List acceptance tests")
-    .action(async () => {
+    .option("--format <format>", "Output format: json or table", "json")
+    .action(async (options: { format: ListOutputFormat }) => {
       const tests = await service.list();
+      if (options.format === "table") {
+        console.log(formatAcceptanceTestsAsTable(tests));
+        return;
+      }
       console.log(JSON.stringify(tests, null, 2));
     });
 
@@ -87,6 +95,25 @@ export function createAcceptanceTestCommand(options: AcceptanceTestCommandOption
       console.log(`deleted: ${options.id}`);
     });
 
+  cmd
+    .command("clear")
+    .description("Delete all acceptance test data")
+    .option("-y, --yes", "Skip confirmation prompt")
+    .action(async (options: { yes?: boolean }) => {
+      const confirmed = options.yes
+        ? true
+        : await confirmClearAllData({
+            input: process.stdin,
+            output: process.stdout,
+          });
+      if (!confirmed) {
+        console.log("clear cancelled.");
+        return;
+      }
+      await service.clearAllData();
+      console.log("cleared all acceptance-test data.");
+    });
+
   const result = cmd.command("result").description("Manage acceptance test execution results");
   result
     .command("add")
@@ -116,6 +143,56 @@ export function createAcceptanceTestCommand(options: AcceptanceTestCommandOption
 
 function collectRepeatable(value: string, previous: string[] = []): string[] {
   return [...previous, value];
+}
+
+function formatAcceptanceTestsAsTable(tests: ReadonlyArray<{
+  id: string;
+  title: string;
+  status: string;
+  lastExecutionStatus: string;
+  epicIds: string[];
+  itemIds: string[];
+}>): string {
+  const headers = ["ID", "Title", "Status", "Last Execution", "Epic IDs", "Item IDs"] as const;
+  const rows = tests.map((test) => [
+    test.id,
+    test.title.replace(/\s+/g, " ").trim(),
+    test.status,
+    test.lastExecutionStatus,
+    test.epicIds.join(", "),
+    test.itemIds.join(", "),
+  ]);
+  if (rows.length === 0) {
+    return "(no acceptance tests)";
+  }
+  const widths = headers.map((header, index) =>
+    Math.max(header.length, ...rows.map((row) => row[index].length)),
+  );
+  const line = (values: readonly string[]) => values.map((value, index) => value.padEnd(widths[index])).join(" | ");
+  const separator = widths.map((width) => "-".repeat(width)).join("-+-");
+  return [line(headers), separator, ...rows.map((row) => line(row))].join("\n");
+}
+
+async function confirmClearAllData(input: {
+  input: NodeJS.ReadableStream & { isTTY?: boolean };
+  output: NodeJS.WritableStream;
+}): Promise<boolean> {
+  if (!input.input.isTTY) {
+    throw new Error("clear requires an interactive terminal confirmation. Use --yes to skip confirmation.");
+  }
+
+  const rl = createInterface({
+    input: input.input,
+    output: input.output,
+  });
+  try {
+    const answer = await rl.question(
+      "This will permanently delete all acceptance-test data (.codefleet/data/acceptance-testing). Continue? [y/N] ",
+    );
+    return ["y", "yes"].includes(answer.trim().toLowerCase());
+  } finally {
+    rl.close();
+  }
 }
 
 function buildAgentUsageHelp(executableName: string): string {

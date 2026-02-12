@@ -118,4 +118,29 @@ describe("AcceptanceTestService", () => {
 
     expect(updatedAgain.notes).toEqual(["second", "third"]);
   });
+
+  it("clears all acceptance-test data files", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codefleet-acceptance-"));
+    const dataDir = path.join(tempDir, ".codefleet/data/acceptance-testing");
+    const service = new AcceptanceTestService(dataDir);
+
+    const test = await service.add({
+      title: "clear target",
+      epicIds: ["E-005"],
+      itemIds: ["I-005"],
+    });
+    await service.addResult({
+      testId: test.id,
+      status: "passed",
+      summary: "ok",
+      executor: "qa",
+      artifacts: [],
+      logs: [],
+    });
+
+    await service.clearAllData();
+
+    await expect(fs.access(path.join(dataDir, "spec.json"))).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(fs.access(path.join(dataDir, "results"))).rejects.toMatchObject({ code: "ENOENT" });
+  });
 });

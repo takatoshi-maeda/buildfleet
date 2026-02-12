@@ -181,6 +181,12 @@ export class AcceptanceTestService {
     return result;
   }
 
+  async clearAllData(): Promise<void> {
+    // Deleting the whole acceptance-testing directory guarantees spec cache and
+    // results history are reset together without leaving partial state behind.
+    await fs.rm(this.dataDir, { recursive: true, force: true });
+  }
+
   async selfHealLastExecutionStatus(): Promise<void> {
     const spec = await this.getOrInitializeSpec();
     const latestStatusByTestId = await this.latestResultStatuses();
