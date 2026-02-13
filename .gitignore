@@ -4,3 +4,7 @@ coverage/
 .vitest/
 tmp
 .codefleet
+.vibebox-workspaces
+.github-user
+.zsh_history
+devcontainer.local.json
