@@ -60,10 +60,15 @@ describe("backlog command", () => {
 
     await expect(command.parseAsync(["epic", "--help"], { from: "user" })).rejects.toBeDefined();
     expect(output).toContain("ready");
+    expect(output).toContain("read");
 
     output = "";
     await expect(command.parseAsync(["epic", "list", "--help"], { from: "user" })).rejects.toBeDefined();
     expect(output).toContain("--kind <kind>");
+
+    output = "";
+    await expect(command.parseAsync(["item", "--help"], { from: "user" })).rejects.toBeDefined();
+    expect(output).toContain("read");
   });
 
   it("shows requirements subcommands in help", async () => {

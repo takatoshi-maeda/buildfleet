@@ -7,6 +7,7 @@ import type {
   VisibilityType,
 } from "../../domain/backlog-items-model.js";
 import { BacklogService } from "../../domain/backlog/backlog-service.js";
+import { CodefleetError } from "../../shared/errors.js";
 
 interface BacklogCommandOptions {
   commandName?: string;
@@ -99,6 +100,19 @@ export function createBacklogCommand(options: BacklogCommandOptions = {}): Comma
       const listed = await service.listReadyEpics(options.status as BacklogEpicStatus | undefined);
       console.log(JSON.stringify(listed, null, 2));
     });
+  epic
+    .command("read")
+    .description("Read epic by id")
+    .requiredOption("--id <id>", "Epic id")
+    .action(async (options) => {
+      const listed = await service.list({ includeHidden: true });
+      const found = listed.epics.find((epic) => epic.id === options.id);
+      if (!found) {
+        throw new CodefleetError("ERR_NOT_FOUND", `epic not found: ${options.id}`);
+      }
+      console.log(JSON.stringify(found, null, 2));
+    });
+
 
   epic
     .command("update")
@@ -186,6 +200,20 @@ export function createBacklogCommand(options: BacklogCommandOptions = {}): Comma
       });
       console.log(JSON.stringify(listed.items, null, 2));
     });
+
+  item
+    .command("read")
+    .description("Read item by id")
+    .requiredOption("--id <id>", "Item id")
+    .action(async (options) => {
+      const listed = await service.list({ includeHidden: true });
+      const found = listed.items.find((item) => item.id === options.id);
+      if (!found) {
+        throw new CodefleetError("ERR_NOT_FOUND", `item not found: ${options.id}`);
+      }
+      console.log(JSON.stringify(found, null, 2));
+    });
+
 
   item
     .command("update")
