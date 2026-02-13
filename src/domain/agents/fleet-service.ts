@@ -310,6 +310,12 @@ export class FleetService {
     const instructions = await getRoleStartupPrompt(agentRole);
     const eventPromptDefinition = getRoleEventPromptDefinition(agentRole, event.type);
     const eventPromptTemplate = await getRoleEventPromptTemplate(agentRole, eventPromptDefinition.promptEventType);
+    if (!eventPromptTemplate && eventPromptDefinition.promptEventType !== eventPromptDefinition.triggerEventType) {
+      throw new CodefleetError(
+        "ERR_NOT_FOUND",
+        `event prompt template not found for role=${agentRole} event=${eventPromptDefinition.promptEventType}`,
+      );
+    }
     if (!eventPromptTemplate) {
       return instructions.trim();
     }
