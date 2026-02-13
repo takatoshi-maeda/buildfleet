@@ -43,6 +43,8 @@ describe("trigger command", () => {
     await expect(command.parseAsync(["--help"], { from: "user" })).rejects.toBeDefined();
 
     expect(output).toContain("docs.update");
+    expect(output).toContain("acceptance-test.update");
+    expect(output).toContain("backlog.update");
     expect(output).toContain("--paths <path> (repeatable/comma-separated)");
     expect(output).not.toContain("docs.update [options]");
   });
@@ -87,6 +89,30 @@ describe("trigger command", () => {
         paths: ["docs/a.md", "docs/b.md", "docs/c.md"],
       },
     ]);
+    expect(logSpy).toHaveBeenCalled();
+  });
+
+  it("builds acceptance-test.update event with no options", async () => {
+    const router = new RecordingRouter();
+    const queue = new RecordingQueue();
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    await createTriggerCommand({ router, queue }).parseAsync(["acceptance-test.update"], { from: "user" });
+
+    expect(router.events).toEqual([{ type: "acceptance-test.update" }]);
+    expect(queue.events).toEqual([{ type: "acceptance-test.update" }]);
+    expect(logSpy).toHaveBeenCalled();
+  });
+
+  it("builds backlog.update event with no options", async () => {
+    const router = new RecordingRouter();
+    const queue = new RecordingQueue();
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    await createTriggerCommand({ router, queue }).parseAsync(["backlog.update"], { from: "user" });
+
+    expect(router.events).toEqual([{ type: "backlog.update" }]);
+    expect(queue.events).toEqual([{ type: "backlog.update" }]);
     expect(logSpy).toHaveBeenCalled();
   });
 

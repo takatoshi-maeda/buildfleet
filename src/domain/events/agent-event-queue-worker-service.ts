@@ -122,13 +122,15 @@ async function validateQueueMessage(filePath: string): Promise<AgentEventQueueMe
   if (message.agentRole !== "Orchestrator" && message.agentRole !== "Developer" && message.agentRole !== "Gatekeeper") {
     throw new Error("queue message.agentRole must be a valid AgentRole");
   }
-  if (
-    !message.event ||
-    typeof message.event.type !== "string" ||
-    !Array.isArray(message.event.paths) ||
-    !message.event.paths.every((entry) => typeof entry === "string")
-  ) {
-    throw new Error("queue message.event must include type and string paths");
+  if (!message.event || typeof message.event.type !== "string") {
+    throw new Error("queue message.event.type must be a string");
+  }
+  if (message.event.type === "docs.update") {
+    if (!Array.isArray(message.event.paths) || !message.event.paths.every((entry: unknown) => typeof entry === "string")) {
+      throw new Error("queue message.event.paths must be string[] for docs.update");
+    }
+  } else if (message.event.type !== "acceptance-test.update" && message.event.type !== "backlog.update") {
+    throw new Error("queue message.event.type must be a known SystemEvent");
   }
 
   return message as AgentEventQueueMessage;

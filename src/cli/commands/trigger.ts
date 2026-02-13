@@ -2,6 +2,8 @@ import { Command } from "commander";
 import {
   createCodefleetCommandDispatcher,
   EventRouter,
+  SYSTEM_EVENT_COMMAND_DEFINITIONS,
+  SYSTEM_EVENT_TYPES,
   type RouteResult,
   type SystemEvent,
 } from "../../events/router.js";
@@ -27,18 +29,38 @@ export function createTriggerCommand(options: TriggerCommandOptions = {}): Comma
     subcommandTerm: (subcommand: Command) => `${subcommand.name()}${formatRegisteredArgs(subcommand)}`,
   });
 
-  cmd
-    .command("docs.update")
-    .description("SystemEvent.type=docs.update")
-    .summary("--paths <path> (repeatable/comma-separated)")
-    .requiredOption("--paths <path>", "Updated document path (repeatable/comma-separated)", collectPaths, [])
-    .action(async (options: { paths: string[] }) => {
-      const paths = options.paths.filter((value) => value.length > 0);
-      if (paths.length === 0) {
-        throw new Error("docs.update: --paths must include at least one path");
+  for (const eventType of SYSTEM_EVENT_TYPES) {
+    const definition = SYSTEM_EVENT_COMMAND_DEFINITIONS[eventType];
+    const subcommand = cmd.command(eventType).description(definition.description);
+    if (definition.options && definition.options.length > 0) {
+      const summary = definition.options
+        .map((option) => option.summaryToken)
+        .filter((token): token is string => typeof token === "string" && token.length > 0)
+        .join(" ");
+      if (summary.length > 0) {
+        subcommand.summary(summary);
       }
-      await executeRoute(router, queue, { type: "docs.update", paths });
+      for (const option of definition.options) {
+        const parser = option.parser === "csv-repeatable" ? collectCsvRepeatable : undefined;
+        if (option.required) {
+          if (parser) {
+            subcommand.requiredOption(option.flags, option.description, parser, []);
+          } else {
+            subcommand.requiredOption(option.flags, option.description);
+          }
+          continue;
+        }
+        if (parser) {
+          subcommand.option(option.flags, option.description, parser, []);
+        } else {
+          subcommand.option(option.flags, option.description);
+        }
+      }
+    }
+    subcommand.action(async (parsedOptions: Record<string, unknown>) => {
+      await executeRoute(router, queue, definition.createEvent(parsedOptions));
     });
+  }
 
   return cmd;
 }
@@ -68,7 +90,7 @@ function printRouteResult(event: SystemEvent, result: RouteResult, enqueueResult
   );
 }
 
-function collectPaths(value: string, previous: string[] = []): string[] {
+function collectCsvRepeatable(value: string, previous: string[] = []): string[] {
   const nextValues = value
     .split(",")
     .map((entry) => entry.trim())

@@ -5,6 +5,66 @@ export type SystemEvent =
   | { type: "acceptance-test.update" }
   | { type: "backlog.update" };
 
+export const SYSTEM_EVENT_TYPES: ReadonlyArray<SystemEvent["type"]> = [
+  "docs.update",
+  "acceptance-test.update",
+  "backlog.update",
+];
+
+export interface SystemEventCommandOptionDefinition {
+  key: string;
+  flags: string;
+  description: string;
+  required?: boolean;
+  parser?: "csv-repeatable";
+  summaryToken?: string;
+}
+
+export interface SystemEventCommandDefinition {
+  description: string;
+  options?: ReadonlyArray<SystemEventCommandOptionDefinition>;
+  createEvent: (parsedOptions: Record<string, unknown>) => SystemEvent;
+}
+
+// Keep event CLI registration alongside event type modeling so adding a new
+// SystemEvent naturally forces a trigger command definition in one place.
+export const SYSTEM_EVENT_COMMAND_DEFINITIONS: Record<SystemEvent["type"], SystemEventCommandDefinition> = {
+  "docs.update": {
+    description: "SystemEvent.type=docs.update",
+    options: [
+      {
+        key: "paths",
+        flags: "--paths <path>",
+        description: "Updated document path (repeatable/comma-separated)",
+        required: true,
+        parser: "csv-repeatable",
+        summaryToken: "--paths <path> (repeatable/comma-separated)",
+      },
+    ],
+    createEvent(parsedOptions) {
+      const paths = Array.isArray(parsedOptions.paths)
+        ? parsedOptions.paths.filter((value): value is string => typeof value === "string" && value.length > 0)
+        : [];
+      if (paths.length === 0) {
+        throw new Error("docs.update: --paths must include at least one path");
+      }
+      return { type: "docs.update", paths };
+    },
+  },
+  "acceptance-test.update": {
+    description: "SystemEvent.type=acceptance-test.update",
+    createEvent() {
+      return { type: "acceptance-test.update" };
+    },
+  },
+  "backlog.update": {
+    description: "SystemEvent.type=backlog.update",
+    createEvent() {
+      return { type: "backlog.update" };
+    },
+  },
+};
+
 export interface CommandExecution {
   executable: string;
   args: string[];

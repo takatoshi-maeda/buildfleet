@@ -323,6 +323,16 @@ async function waitForShutdownSignal(
             failedCount: result.failedFiles.length,
             failures: result.failures,
           });
+          for (const failure of result.failures) {
+            emit({
+              ts: new Date().toISOString(),
+              level: "error",
+              event: "fleet.queue.message_failed",
+              agentId,
+              file: failure.file,
+              reason: failure.reason,
+            });
+          }
         }
       }
     } catch (error) {
@@ -540,6 +550,13 @@ function humanMessageForEvent(event: string, payload: Record<string, unknown>): 
     const consumed = typeof payload.consumed === "number" ? payload.consumed : 0;
     const failedCount = typeof payload.failedCount === "number" ? payload.failedCount : 0;
     return `queue consumed agent=${agentId} consumed=${consumed} failed=${failedCount}`;
+  }
+
+  if (event === "fleet.queue.message_failed") {
+    const agentId = typeof payload.agentId === "string" ? payload.agentId : "unknown-agent";
+    const file = typeof payload.file === "string" ? payload.file : "unknown-file";
+    const reason = typeof payload.reason === "string" ? payload.reason : "unknown error";
+    return `queue message failed agent=${agentId} file=${file} reason=${reason}`;
   }
 
   if (event === "fleet.down.requested") {
