@@ -192,7 +192,7 @@ describe("FleetService", () => {
     expect(status.sessions[0]?.activeTurnId).toBe("gatekeeper-1-event-turn");
   });
 
-  it("does not emit a follow-up event when event mapping does not change type", async () => {
+  it("does not emit a follow-up system event for developer implementation prompts", async () => {
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codefleet-fleet-"));
     const rolesPath = path.join(tempDir, ".codefleet/roles.json");
     const runtimeDir = path.join(tempDir, ".codefleet/runtime");
@@ -210,9 +210,11 @@ describe("FleetService", () => {
     const emittedEvent = await service.dispatchAgentEvent({
       agentId: "developer-1",
       agentRole: "Developer",
-      event: { type: "acceptance-test.update" },
+      event: { type: "backlog.epic.ready", epicId: "E-123" },
     });
     expect(emittedEvent).toBeNull();
+    expect(appServer.startedTurns[0]?.input[0]?.text).toContain("Prompt template: implementation.md");
+    expect(appServer.startedTurns[0]?.input[0]?.text).toContain("Epic ID to implement now: E-123");
   });
 
   it("emits backlog.update after orchestrator handles acceptance-test.update", async () => {

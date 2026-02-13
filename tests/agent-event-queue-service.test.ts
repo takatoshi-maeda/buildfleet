@@ -112,4 +112,87 @@ describe("AgentEventQueueService", () => {
     expect(result.enqueuedAgentIds).toEqual(["orchestrator-1"]);
     expect(result.files).toHaveLength(1);
   });
+
+  it("enqueues backlog.epic.ready only for a single running developer", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codefleet-event-queue-"));
+    const runtimeDir = path.join(tempDir, ".codefleet", "runtime");
+    await fs.mkdir(runtimeDir, { recursive: true });
+
+    const runtimes: AgentRuntimeCollection = {
+      version: 1,
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      agents: [
+        {
+          id: "developer-1",
+          role: "Developer",
+          status: "running",
+          pid: 111,
+          cwd: tempDir,
+          startedAt: "2026-01-01T00:00:00.000Z",
+          lastHeartbeatAt: "2026-01-01T00:00:00.000Z",
+        },
+        {
+          id: "developer-2",
+          role: "Developer",
+          status: "running",
+          pid: 222,
+          cwd: tempDir,
+          startedAt: "2026-01-01T00:00:00.000Z",
+          lastHeartbeatAt: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+    };
+
+    await fs.writeFile(path.join(runtimeDir, "agents.json"), `${JSON.stringify(runtimes, null, 2)}\n`, "utf8");
+
+    const service = new AgentEventQueueService(runtimeDir);
+    const result = await service.enqueueToRunningAgents({ type: "backlog.epic.ready" });
+
+    expect(result.enqueuedAgentIds).toEqual(["developer-1"]);
+    expect(result.files).toHaveLength(1);
+  });
+
+  it("drops backlog.epic.ready when same event is already pending/processing", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codefleet-event-queue-"));
+    const runtimeDir = path.join(tempDir, ".codefleet", "runtime");
+    await fs.mkdir(runtimeDir, { recursive: true });
+
+    const runtimes: AgentRuntimeCollection = {
+      version: 1,
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      agents: [
+        {
+          id: "developer-1",
+          role: "Developer",
+          status: "running",
+          pid: 111,
+          cwd: tempDir,
+          startedAt: "2026-01-01T00:00:00.000Z",
+          lastHeartbeatAt: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+    };
+
+    await fs.writeFile(path.join(runtimeDir, "agents.json"), `${JSON.stringify(runtimes, null, 2)}\n`, "utf8");
+    const processingDir = path.join(runtimeDir, "events", "agents", "developer-1", "processing");
+    await fs.mkdir(processingDir, { recursive: true });
+    await fs.writeFile(
+      path.join(processingDir, "existing.json"),
+      `${JSON.stringify({
+        id: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        agentId: "developer-1",
+        agentRole: "Developer",
+        event: { type: "backlog.epic.ready" },
+        source: { command: "codefleet trigger backlog.epic.ready" },
+      })}\n`,
+      "utf8",
+    );
+
+    const service = new AgentEventQueueService(runtimeDir);
+    const result = await service.enqueueToRunningAgents({ type: "backlog.epic.ready" });
+
+    expect(result.enqueuedAgentIds).toEqual([]);
+    expect(result.files).toEqual([]);
+  });
 });

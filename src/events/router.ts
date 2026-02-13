@@ -3,12 +3,14 @@ import { spawn } from "node:child_process";
 export type SystemEvent =
   | { type: "docs.update"; paths: string[] }
   | { type: "acceptance-test.update" }
-  | { type: "backlog.update" };
+  | { type: "backlog.update" }
+  | { type: "backlog.epic.ready"; epicId?: string };
 
 export const SYSTEM_EVENT_TYPES: ReadonlyArray<SystemEvent["type"]> = [
   "docs.update",
   "acceptance-test.update",
   "backlog.update",
+  "backlog.epic.ready",
 ];
 
 export interface SystemEventCommandOptionDefinition {
@@ -61,6 +63,12 @@ export const SYSTEM_EVENT_COMMAND_DEFINITIONS: Record<SystemEvent["type"], Syste
     description: "SystemEvent.type=backlog.update",
     createEvent() {
       return { type: "backlog.update" };
+    },
+  },
+  "backlog.epic.ready": {
+    description: "SystemEvent.type=backlog.epic.ready",
+    createEvent() {
+      return { type: "backlog.epic.ready" };
     },
   },
 };

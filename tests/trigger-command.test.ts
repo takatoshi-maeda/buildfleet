@@ -45,6 +45,7 @@ describe("trigger command", () => {
     expect(output).toContain("docs.update");
     expect(output).toContain("acceptance-test.update");
     expect(output).toContain("backlog.update");
+    expect(output).toContain("backlog.epic.ready");
     expect(output).toContain("--paths <path> (repeatable/comma-separated)");
     expect(output).not.toContain("docs.update [options]");
   });
@@ -113,6 +114,18 @@ describe("trigger command", () => {
 
     expect(router.events).toEqual([{ type: "backlog.update" }]);
     expect(queue.events).toEqual([{ type: "backlog.update" }]);
+    expect(logSpy).toHaveBeenCalled();
+  });
+
+  it("builds backlog.epic.ready event with no options", async () => {
+    const router = new RecordingRouter();
+    const queue = new RecordingQueue();
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    await createTriggerCommand({ router, queue }).parseAsync(["backlog.epic.ready"], { from: "user" });
+
+    expect(router.events).toEqual([{ type: "backlog.epic.ready" }]);
+    expect(queue.events).toEqual([{ type: "backlog.epic.ready" }]);
     expect(logSpy).toHaveBeenCalled();
   });
 

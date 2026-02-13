@@ -251,6 +251,33 @@ describe("BacklogService", () => {
     expect(readyAfter.map((epic) => epic.id)).toEqual(["E-001", "E-002"]);
   });
 
+  it("claims a single ready epic for implementation and removes it from ready(todo) candidates", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codefleet-backlog-"));
+    const backlogDir = path.join(tempDir, ".codefleet/data/backlog");
+    const acceptanceSpecPath = path.join(tempDir, ".codefleet/data/acceptance-testing/spec.json");
+    const rolesPath = path.join(tempDir, ".codefleet/roles.json");
+
+    await fs.mkdir(path.dirname(acceptanceSpecPath), { recursive: true });
+    await fs.writeFile(
+      acceptanceSpecPath,
+      JSON.stringify({ version: 1, updatedAt: "2026-01-01T00:00:00.000Z", tests: [] }, null, 2),
+      "utf8",
+    );
+    await fs.mkdir(path.dirname(rolesPath), { recursive: true });
+    await fs.writeFile(rolesPath, JSON.stringify({ agents: [] }, null, 2), "utf8");
+
+    const service = new BacklogService(backlogDir, acceptanceSpecPath, rolesPath);
+    const first = await service.addEpic({ title: "first", acceptanceTestIds: [] });
+    const second = await service.addEpic({ title: "second", acceptanceTestIds: [] });
+
+    const claimed = await service.claimReadyEpicForImplementation("developer-1");
+    expect(claimed?.id).toBe(first.id);
+    expect(claimed?.status).toBe("in-progress");
+
+    const readyTodo = await service.listReadyEpics("todo");
+    expect(readyTodo.map((epic) => epic.id)).toEqual([second.id]);
+  });
+
   it("supports kind classification and filtering for epics/items", async () => {
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codefleet-backlog-"));
     const backlogDir = path.join(tempDir, ".codefleet/data/backlog");

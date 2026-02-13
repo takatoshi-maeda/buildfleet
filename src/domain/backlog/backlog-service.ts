@@ -54,6 +54,7 @@ interface UpdateEpicInput {
   visibility?: VisibilityRule;
   acceptanceTestIds?: string[];
   reopen?: boolean;
+  force?: boolean;
   actorId?: string;
 }
 
@@ -97,6 +98,10 @@ interface AnswerQuestionInput {
   id: string;
   answer: string;
   actorId?: string;
+}
+
+interface ReadByIdInput {
+  id: string;
 }
 
 type NormalizedBacklogItems = Omit<BacklogItems, "questions"> & { questions: BacklogQuestion[] };
@@ -187,6 +192,39 @@ export class BacklogService {
     return items.epics.filter((epic) => isVisible(epic, epicsById) && (!status || epic.status === status));
   }
 
+  async readEpic(input: ReadByIdInput): Promise<BacklogEpic> {
+    const items = await this.getOrInitializeItems();
+    const epic = items.epics.find((value) => value.id === input.id);
+    if (!epic) {
+      throw new CodefleetError("ERR_NOT_FOUND", `epic not found: ${input.id}`);
+    }
+    return { ...epic };
+  }
+
+  async claimReadyEpicForImplementation(actorId?: string): Promise<BacklogEpic | null> {
+    const items = await this.getOrInitializeItems();
+    const epicsById = new Map(items.epics.map((epic) => [epic.id, epic]));
+    const candidate = items.epics.find((epic) => epic.status === "todo" && isVisible(epic, epicsById));
+    if (!candidate) {
+      return null;
+    }
+
+    // Claim converts the selected epic from a "ready queue candidate" into active work.
+    // This prevents repeated backlog.epic.ready dispatches from selecting the same epic again.
+    ensureValidEpicStatusTransition(candidate.status, "in-progress");
+    const now = new Date().toISOString();
+    candidate.status = "in-progress";
+    candidate.updatedAt = now;
+    items.updatedAt = now;
+
+    await this.persistWithChangeLog(
+      items,
+      await this.resolveRole(actorId),
+      [`- epic claimed for implementation: ${candidate.id}`],
+    );
+    return candidate;
+  }
+
   async addEpic(input: AddEpicInput): Promise<BacklogEpic> {
     const items = await this.getOrInitializeItems();
     const spec = await this.getAcceptanceSpecForValidation(input.acceptanceTestIds);
@@ -225,7 +263,9 @@ export class BacklogService {
     }
 
     if (input.status) {
-      ensureValidEpicStatusTransition(epic.status, input.status, input.reopen ?? false);
+      if (!input.force) {
+        ensureValidEpicStatusTransition(epic.status, input.status, input.reopen ?? false);
+      }
       epic.status = input.status;
     }
 
@@ -352,6 +392,15 @@ export class BacklogService {
     items.updatedAt = new Date().toISOString();
 
     await this.persistWithChangeLog(items, await this.resolveRole(actorId), [`- item deleted: ${id}`]);
+  }
+
+  async readItem(input: ReadByIdInput): Promise<BacklogItem> {
+    const items = await this.getOrInitializeItems();
+    const item = items.items.find((value) => value.id === input.id);
+    if (!item) {
+      throw new CodefleetError("ERR_NOT_FOUND", `item not found: ${input.id}`);
+    }
+    return { ...item };
   }
 
   async listQuestions(): Promise<BacklogQuestion[]> {

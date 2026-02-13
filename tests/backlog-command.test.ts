@@ -67,6 +67,10 @@ describe("backlog command", () => {
     expect(output).toContain("--kind <kind>");
 
     output = "";
+    await expect(command.parseAsync(["epic", "ready", "--help"], { from: "user" })).rejects.toBeDefined();
+    expect(output).not.toContain("--status <status>");
+
+    output = "";
     await expect(command.parseAsync(["item", "--help"], { from: "user" })).rejects.toBeDefined();
     expect(output).toContain("read");
 

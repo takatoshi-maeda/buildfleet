@@ -129,8 +129,19 @@ async function validateQueueMessage(filePath: string): Promise<AgentEventQueueMe
     if (!Array.isArray(message.event.paths) || !message.event.paths.every((entry: unknown) => typeof entry === "string")) {
       throw new Error("queue message.event.paths must be string[] for docs.update");
     }
-  } else if (message.event.type !== "acceptance-test.update" && message.event.type !== "backlog.update") {
+  } else if (
+    message.event.type !== "acceptance-test.update" &&
+    message.event.type !== "backlog.update" &&
+    message.event.type !== "backlog.epic.ready"
+  ) {
     throw new Error("queue message.event.type must be a known SystemEvent");
+  }
+  if (
+    message.event.type === "backlog.epic.ready" &&
+    message.event.epicId !== undefined &&
+    typeof message.event.epicId !== "string"
+  ) {
+    throw new Error("queue message.event.epicId must be string for backlog.epic.ready");
   }
 
   return message as AgentEventQueueMessage;

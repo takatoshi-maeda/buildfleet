@@ -65,19 +65,43 @@ describe("watchers", () => {
     ).toBe(true);
   });
 
-  it("emits docs.update repeatedly from backlog poller", async () => {
+  it("emits backlog.epic.ready repeatedly when ready epics exist", async () => {
     const sink = new RecordingSink();
-    const poller = new BacklogPoller(sink, "Developer", 20);
+    const poller = new BacklogPoller(
+      sink,
+      20,
+      {
+        async hasReadyEpic() {
+          return true;
+        },
+      },
+    );
     poller.start();
 
     await sleep(70);
     poller.stop();
 
     expect(
-      sink.events.filter(
-        (event) =>
-          event.type === "docs.update" && event.paths.some((entry) => entry === ".codefleet/data/backlog-items.json"),
-      ).length,
+      sink.events.filter((event) => event.type === "backlog.epic.ready").length,
     ).toBeGreaterThanOrEqual(2);
+  });
+
+  it("does not emit backlog.epic.ready when ready epics do not exist", async () => {
+    const sink = new RecordingSink();
+    const poller = new BacklogPoller(
+      sink,
+      20,
+      {
+        async hasReadyEpic() {
+          return false;
+        },
+      },
+    );
+    poller.start();
+
+    await sleep(70);
+    poller.stop();
+
+    expect(sink.events).toEqual([]);
   });
 });

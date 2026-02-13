@@ -94,12 +94,12 @@ export function createBacklogCommand(options: BacklogCommandOptions = {}): Comma
 
   epic
     .command("ready")
-    .description("List startable epics filtered by visibility dependencies")
-    .option("--status <status>", "Filter by status")
-    .action(async (options) => {
-      const listed = await service.listReadyEpics(options.status as BacklogEpicStatus | undefined);
+    .description("List startable epics with status=todo filtered by visibility dependencies")
+    .action(async () => {
+      const listed = await service.listReadyEpics("todo");
       console.log(JSON.stringify(listed, null, 2));
     });
+
   epic
     .command("read")
     .description("Read epic by id")
@@ -113,7 +113,6 @@ export function createBacklogCommand(options: BacklogCommandOptions = {}): Comma
       console.log(JSON.stringify(found, null, 2));
     });
 
-
   epic
     .command("update")
     .requiredOption("--id <id>", "Epic id")
@@ -123,6 +122,7 @@ export function createBacklogCommand(options: BacklogCommandOptions = {}): Comma
     .option("--remove-note <note>", "Remove epic note by exact match", collectRepeatable, [])
     .option("--status <status>", "Epic status")
     .option("--reopen", "Allow done -> in-progress")
+    .option("--force", "Bypass epic status transition guard")
     .option("--visibility-type <type>", "always-visible or blocked-until-epic-complete")
     .option("--depends-on <epicId>", "Epic dependency ids (replace)", collectRepeatable)
     .option("--acceptance-test <testId>", "Acceptance test ids (replace)", collectRepeatable)
@@ -143,6 +143,7 @@ export function createBacklogCommand(options: BacklogCommandOptions = {}): Comma
         removeNotes: options.removeNote,
         status: options.status as BacklogEpicStatus | undefined,
         reopen: Boolean(options.reopen),
+        force: Boolean(options.force),
         visibility,
         acceptanceTestIds: options.acceptanceTest,
         actorId: options.actorId,
@@ -215,7 +216,6 @@ export function createBacklogCommand(options: BacklogCommandOptions = {}): Comma
       }
       console.log(JSON.stringify(found, null, 2));
     });
-
 
   item
     .command("update")

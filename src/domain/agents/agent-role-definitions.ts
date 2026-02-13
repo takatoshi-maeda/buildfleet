@@ -3,11 +3,11 @@ import type { AgentRole } from "../roles-model.js";
 
 export interface RoleEventPromptDefinition {
   triggerEventType: SystemEvent["type"];
-  promptEventType: SystemEvent["type"];
+  promptEventType: string;
 }
 
 export interface SubscribedEventDefinition {
-  triggerEvent: SystemEvent["type"];
+  triggerEvent: string;
 }
 
 export interface AgentRoleDefinition {
@@ -30,7 +30,11 @@ const AGENT_ROLE_DEFINITIONS: Record<AgentRole, AgentRoleDefinition> = {
   },
   Developer: {
     role: "Developer",
-    subscribedEvents: {},
+    subscribedEvents: {
+      "backlog.epic.ready": {
+        triggerEvent: "implementation",
+      },
+    },
   },
   Gatekeeper: {
     role: "Gatekeeper",

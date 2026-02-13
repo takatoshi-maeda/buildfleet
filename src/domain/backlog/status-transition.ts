@@ -3,9 +3,10 @@ import type { BacklogEpicStatus, BacklogItemStatus } from "../backlog-items-mode
 
 const EPIC_TRANSITIONS: Record<BacklogEpicStatus, BacklogEpicStatus[]> = {
   todo: ["in-progress", "blocked"],
-  "in-progress": ["done", "blocked"],
+  "in-progress": ["done", "blocked", "failed"],
   done: [],
   blocked: ["todo", "in-progress"],
+  failed: ["todo", "in-progress"],
 };
 
 const ITEM_TRANSITIONS: Record<BacklogItemStatus, BacklogItemStatus[]> = {

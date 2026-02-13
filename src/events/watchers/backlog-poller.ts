@@ -1,7 +1,22 @@
 import type { SystemEvent } from "../router.js";
+import { BacklogService } from "../../domain/backlog/backlog-service.js";
 
 export interface EventSink {
   publish(event: SystemEvent): Promise<void>;
+}
+
+interface ReadyEpicProbe {
+  hasReadyEpic(): Promise<boolean>;
+}
+
+class BacklogServiceReadyEpicProbe implements ReadyEpicProbe {
+  constructor(private readonly backlogService: Pick<BacklogService, "listReadyEpics"> = new BacklogService()) {}
+
+  async hasReadyEpic(): Promise<boolean> {
+    // For Developer wake-up we only care about epics that are ready to start now.
+    const readyEpics = await this.backlogService.listReadyEpics("todo");
+    return readyEpics.length > 0;
+  }
 }
 
 export class BacklogPoller {
@@ -9,8 +24,8 @@ export class BacklogPoller {
 
   constructor(
     private readonly sink: EventSink,
-    private readonly actor: "Developer" | "Gatekeeper",
-    private readonly pollIntervalMs: number = 10_000,
+    private readonly pollIntervalMs: number = 3_000,
+    private readonly probe: ReadyEpicProbe = new BacklogServiceReadyEpicProbe(),
   ) {}
 
   start(): void {
@@ -34,11 +49,10 @@ export class BacklogPoller {
   }
 
   private async emitTick(): Promise<void> {
-    // Polling does not point to a concrete changed file, so we emit a stable
-    // domain path token that downstream handlers can map to backlog updates.
-    await this.sink.publish({
-      type: "docs.update",
-      paths: [".codefleet/data/backlog-items.json"],
-    });
+    if (!(await this.probe.hasReadyEpic())) {
+      return;
+    }
+
+    await this.sink.publish({ type: "backlog.epic.ready" });
   }
 }

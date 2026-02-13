@@ -24,12 +24,13 @@ export class AgentEventQueueService {
     const runningAgents = runtimes.agents
       .filter((agent) => agent.status === "running" && isRoleSubscribedToEvent(agent.role, event))
       .sort((left, right) => left.id.localeCompare(right.id));
+    const targetAgents = await this.resolveTargetAgents(event, runningAgents);
 
     const createdAt = new Date().toISOString();
     const files: string[] = [];
 
     // A per-agent spool keeps consumption independent and removes cross-agent lock contention.
-    for (const agent of runningAgents) {
+    for (const agent of targetAgents) {
       const messageId = createUlid();
       const queueFilePath = path.join(
         this.runtimeDir,
@@ -53,9 +54,61 @@ export class AgentEventQueueService {
     }
 
     return {
-      enqueuedAgentIds: runningAgents.map((agent) => agent.id),
+      enqueuedAgentIds: targetAgents.map((agent) => agent.id),
       files,
     };
+  }
+
+  private async resolveTargetAgents(
+    event: SystemEvent,
+    runningAgents: AgentRuntimeCollection["agents"],
+  ): Promise<AgentRuntimeCollection["agents"]> {
+    if (event.type !== "backlog.epic.ready") {
+      return runningAgents;
+    }
+
+    // Developer work for "epic ready" must run serially: select only one developer
+    // and drop duplicate wake-up events while one is already pending/processing.
+    const developer = runningAgents.find((agent) => agent.role === "Developer");
+    if (!developer) {
+      return [];
+    }
+    if (await this.hasInFlightEvent(developer.id, event.type)) {
+      return [];
+    }
+    return [developer];
+  }
+
+  private async hasInFlightEvent(agentId: string, eventType: SystemEvent["type"]): Promise<boolean> {
+    const queueRoot = path.join(this.runtimeDir, EVENT_QUEUE_ROOT, agentId);
+    const queueDirs = [path.join(queueRoot, "pending"), path.join(queueRoot, "processing")];
+
+    for (const queueDir of queueDirs) {
+      let files: string[] = [];
+      try {
+        files = (await fs.readdir(queueDir)).filter((entry) => entry.endsWith(".json"));
+      } catch (error) {
+        const err = error as NodeJS.ErrnoException;
+        if (err.code === "ENOENT") {
+          continue;
+        }
+        throw error;
+      }
+
+      for (const file of files) {
+        try {
+          const raw = await fs.readFile(path.join(queueDir, file), "utf8");
+          const parsed = JSON.parse(raw) as unknown;
+          const type = extractEventType(parsed);
+          if (type === eventType) {
+            return true;
+          }
+        } catch {
+          // Ignore malformed files here. Worker-side validation routes those to failed.
+        }
+      }
+    }
+    return false;
   }
 
   private async readRuntime(): Promise<AgentRuntimeCollection> {
@@ -77,4 +130,15 @@ export class AgentEventQueueService {
       throw error;
     }
   }
+}
+
+function extractEventType(raw: unknown): string | null {
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+  const event = (raw as { event?: unknown }).event;
+  if (!event || typeof event !== "object") {
+    return null;
+  }
+  return typeof (event as { type?: unknown }).type === "string" ? ((event as { type: string }).type as string) : null;
 }

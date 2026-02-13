@@ -6,14 +6,18 @@ import type { AgentRuntime } from "../../domain/agent-runtime-model.js";
 import type { AppServerSession } from "../../domain/app-server-session-model.js";
 import type { AgentRole } from "../../domain/roles-model.js";
 import { FleetService } from "../../domain/agents/fleet-service.js";
+import { BacklogService } from "../../domain/backlog/backlog-service.js";
 import { AgentEventQueueService } from "../../domain/events/agent-event-queue-service.js";
 import { AgentEventQueueWorkerService } from "../../domain/events/agent-event-queue-worker-service.js";
 import { AppServerClient } from "../../infra/appserver/app-server-client.js";
+import { BacklogPoller } from "../../events/watchers/backlog-poller.js";
 import {
   formatAgentEventHumanLog,
   formatAgentEventNotificationLog,
   shouldSuppressNotificationMethod,
 } from "../logging/fleet-agent-event-log.js";
+import type { AgentEventQueueMessage } from "../../domain/events/agent-event-queue-message-model.js";
+import type { SystemEvent } from "../../events/router.js";
 
 interface FleetctlCommandOptions {
   commandName?: string;
@@ -22,6 +26,7 @@ interface FleetctlCommandOptions {
 const SUPERVISOR_PID_PATH = path.join(".codefleet", "runtime", "supervisor.pid");
 const DEFAULT_QUEUE_CONSUME_MAX = 50;
 const DEFAULT_QUEUE_POLL_INTERVAL_MS = 1_000;
+const DEFAULT_EPIC_READY_POLL_INTERVAL_MS = 3_000;
 type LogMode = "human" | "jsonl";
 const ANSI_RESET = "\u001b[0m";
 const ANSI_BOLD = "\u001b[1m";
@@ -98,6 +103,7 @@ export function createFleetctlCommand(options: FleetctlCommandOptions = {}): Com
     .option("-d, --detached", "Run in background")
     .option("--verbose", "Emit verbose JSONL logs for diagnostics")
     .option("--lang <lang>", "Set response language for newly started event threads")
+    .option("--epic-ready-poll-interval-sec <seconds>", "Polling interval for backlog epic ready detection", "3")
     .option("--gatekeepers <count>", "Number of Gatekeeper agents", "1")
     .option("--developers <count>", "Number of Developer agents", "1")
     .action(async (options) => {
@@ -106,6 +112,10 @@ export function createFleetctlCommand(options: FleetctlCommandOptions = {}): Com
       const gatekeepers = Number(options.gatekeepers);
       const developers = Number(options.developers);
       const lang = typeof options.lang === "string" ? options.lang : undefined;
+      const epicReadyPollIntervalMs = parsePositivePollIntervalMs(
+        options.epicReadyPollIntervalSec,
+        "--epic-ready-poll-interval-sec",
+      );
 
       if (Boolean(options.detached)) {
         const detachedPid = await spawnDetachedSupervisorProcess({
@@ -113,6 +123,7 @@ export function createFleetctlCommand(options: FleetctlCommandOptions = {}): Com
           developers,
           verbose: Boolean(options.verbose),
           lang,
+          epicReadyPollIntervalMs,
         });
         emit({
           ts: requestedAt,
@@ -162,7 +173,7 @@ export function createFleetctlCommand(options: FleetctlCommandOptions = {}): Com
       const queueService = new AgentEventQueueService();
       await writeSupervisorPid(process.pid);
       try {
-        await waitForShutdownSignal(service, queueWorker, queueService, emit);
+        await waitForShutdownSignal(service, queueWorker, queueService, emit, epicReadyPollIntervalMs);
       } finally {
         await removeSupervisorPidFile();
       }
@@ -274,9 +285,11 @@ async function waitForShutdownSignal(
   queueWorker: Pick<AgentEventQueueWorkerService, "consume">,
   queueService: Pick<AgentEventQueueService, "enqueueToRunningAgents">,
   emit: (record: object) => void,
+  epicReadyPollIntervalMs: number = DEFAULT_EPIC_READY_POLL_INTERVAL_MS,
 ): Promise<void> {
   let polling = true;
   let consuming = false;
+  const backlogService = new BacklogService();
 
   const consumeLoop = async (): Promise<void> => {
     if (!polling || consuming) {
@@ -295,7 +308,20 @@ async function waitForShutdownSignal(
           { agentId, maxMessages: DEFAULT_QUEUE_CONSUME_MAX },
           {
             onMessage: async (message) => {
-              const emittedEvent = await service.dispatchQueuedEvent(message);
+              const dispatchMessage = await prepareDispatchMessage(message, backlogService);
+              if (!dispatchMessage) {
+                return;
+              }
+
+              let emittedEvent;
+              try {
+                emittedEvent = await service.dispatchQueuedEvent(dispatchMessage);
+                await finalizeEpicExecutionStatus(backlogService, dispatchMessage, message.agentId, null);
+              } catch (error) {
+                await finalizeEpicExecutionStatus(backlogService, dispatchMessage, message.agentId, error);
+                throw error;
+              }
+
               if (!emittedEvent) {
                 return;
               }
@@ -352,6 +378,27 @@ async function waitForShutdownSignal(
   }, DEFAULT_QUEUE_POLL_INTERVAL_MS);
   void consumeLoop();
 
+  const backlogPoller = new BacklogPoller(
+    {
+      publish: async (event) => {
+        const enqueueResult = await queueService.enqueueToRunningAgents(event);
+        if (enqueueResult.enqueuedAgentIds.length === 0) {
+          return;
+        }
+        emit({
+          ts: new Date().toISOString(),
+          level: "info",
+          event: "fleet.event.enqueued",
+          source: "backlog-poller",
+          sourceEventType: "backlog.epic.ready",
+          enqueuedAgentIds: enqueueResult.enqueuedAgentIds,
+        });
+      },
+    },
+    epicReadyPollIntervalMs,
+  );
+  backlogPoller.start();
+
   await new Promise<void>((resolve) => {
     const watchedSignals: NodeJS.Signals[] = ["SIGINT", "SIGTERM"];
     let shuttingDown = false;
@@ -359,6 +406,7 @@ async function waitForShutdownSignal(
     const cleanup = (): void => {
       polling = false;
       clearInterval(queueTimer);
+      backlogPoller.stop();
       for (const signal of watchedSignals) {
         process.removeListener(signal, onSignal);
       }
@@ -421,11 +469,63 @@ async function waitForShutdownSignal(
   });
 }
 
+async function prepareDispatchMessage(
+  message: AgentEventQueueMessage,
+  backlogService: Pick<BacklogService, "claimReadyEpicForImplementation">,
+): Promise<AgentEventQueueMessage | null> {
+  if (message.event.type !== "backlog.epic.ready") {
+    return message;
+  }
+
+  // Claiming at consume-time keeps enqueue cheap and avoids losing epics when
+  // queued messages fail before an agent actually starts handling the task.
+  const claimed = await backlogService.claimReadyEpicForImplementation(message.agentId);
+  if (!claimed) {
+    return null;
+  }
+
+  const event: SystemEvent = {
+    type: "backlog.epic.ready",
+    epicId: claimed.id,
+  };
+  return {
+    ...message,
+    event,
+  };
+}
+
+async function finalizeEpicExecutionStatus(
+  backlogService: Pick<BacklogService, "updateEpic">,
+  message: AgentEventQueueMessage,
+  actorId: string,
+  error: unknown,
+): Promise<void> {
+  if (message.event.type !== "backlog.epic.ready" || !message.event.epicId) {
+    return;
+  }
+
+  await backlogService.updateEpic({
+    id: message.event.epicId,
+    status: error ? "failed" : "done",
+    force: true,
+    actorId,
+  });
+}
+
+function parsePositivePollIntervalMs(raw: unknown, optionName: string): number {
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value <= 0) {
+    throw new Error(`${optionName} must be a positive number`);
+  }
+  return Math.max(1, Math.floor(value * 1_000));
+}
+
 async function spawnDetachedSupervisorProcess(input: {
   gatekeepers: number;
   developers: number;
   verbose: boolean;
   lang?: string;
+  epicReadyPollIntervalMs: number;
 }): Promise<number | null> {
   const args = [
     process.argv[1],
@@ -440,6 +540,9 @@ async function spawnDetachedSupervisorProcess(input: {
   }
   if (input.lang) {
     args.push("--lang", input.lang);
+  }
+  if (input.epicReadyPollIntervalMs !== DEFAULT_EPIC_READY_POLL_INTERVAL_MS) {
+    args.push("--epic-ready-poll-interval-sec", String(input.epicReadyPollIntervalMs / 1_000));
   }
   const child = spawn(process.execPath, args, {
     detached: true,

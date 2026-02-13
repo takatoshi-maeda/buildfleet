@@ -4,7 +4,7 @@ import { AppServerClient } from "../../infra/appserver/app-server-client.js";
 import { JsonRepository } from "../../infra/fs/json-repository.js";
 import { FleetProcessManager } from "../../infra/process/fleet-process-manager.js";
 import { CodefleetError } from "../../shared/errors.js";
-import type { SystemEvent } from "../../events/router.js";
+import { SYSTEM_EVENT_TYPES, type SystemEvent } from "../../events/router.js";
 import type { AgentRuntime, AgentRuntimeCollection } from "../agent-runtime-model.js";
 import type { AppServerSession, AppServerSessionCollection } from "../app-server-session-model.js";
 import type { AgentEventQueueMessage } from "../events/agent-event-queue-message-model.js";
@@ -271,6 +271,9 @@ export class FleetService {
     if (eventPromptDefinition.promptEventType === input.event.type) {
       return null;
     }
+    if (!isSystemEventType(eventPromptDefinition.promptEventType)) {
+      return null;
+    }
     return buildFollowUpEvent(eventPromptDefinition.promptEventType, input.event);
   }
 
@@ -359,7 +362,14 @@ function buildFollowUpEvent(nextEventType: SystemEvent["type"], sourceEvent: Sys
   if (nextEventType === "acceptance-test.update") {
     return { type: "acceptance-test.update" };
   }
-  return { type: "backlog.update" };
+  if (nextEventType === "backlog.update") {
+    return { type: "backlog.update" };
+  }
+  return { type: "backlog.epic.ready" };
+}
+
+function isSystemEventType(value: string): value is SystemEvent["type"] {
+  return SYSTEM_EVENT_TYPES.includes(value as SystemEvent["type"]);
 }
 
 interface TargetAgent {
