@@ -125,9 +125,11 @@ export class BacklogService {
       await ensureStableBacklogSnapshot(this.backlogDir);
     }
 
-    const role = await this.resolveRole(input.actorId);
-    if (input.includeHidden && role !== "Orchestrator") {
-      throw new CodefleetError("ERR_VALIDATION", "--include-hidden is allowed for Orchestrator role only");
+    if (input.includeHidden && input.actorId) {
+      const role = await this.resolveRole(input.actorId);
+      if (role !== "Orchestrator") {
+        throw new CodefleetError("ERR_VALIDATION", "--include-hidden is allowed for Orchestrator role only");
+      }
     }
 
     const items = await this.getOrInitializeItems();
@@ -144,6 +146,12 @@ export class BacklogService {
     );
 
     return { ...items, epics, items: backlogItems, questions: [...items.questions] };
+  }
+
+  async listReadyEpics(status?: BacklogEpicStatus): Promise<BacklogEpic[]> {
+    const items = await this.getOrInitializeItems();
+    const epicsById = new Map(items.epics.map((epic) => [epic.id, epic]));
+    return items.epics.filter((epic) => isVisible(epic, epicsById) && (!status || epic.status === status));
   }
 
   async addEpic(input: AddEpicInput): Promise<BacklogEpic> {

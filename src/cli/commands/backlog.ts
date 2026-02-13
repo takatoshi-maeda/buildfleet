@@ -31,12 +31,13 @@ export function createBacklogCommand(options: BacklogCommandOptions = {}): Comma
     .command("list")
     .description("List epics and items")
     .option("--status <status>", "Filter by status")
-    .option("--include-hidden", "Include hidden epics/items (Orchestrator only)")
+    .option("--visible-only", "Show only currently visible epics/items")
+    .option("--include-hidden", "Deprecated: hidden items are included by default")
     .option("--actor-id <actorId>", "Current actor id")
     .action(async (options) => {
       const listed = await service.list({
         status: options.status as BacklogEpicStatus | BacklogItemStatus | undefined,
-        includeHidden: Boolean(options.includeHidden),
+        includeHidden: !Boolean(options.visibleOnly),
         actorId: options.actorId,
       });
       console.log(JSON.stringify(listed, null, 2));
@@ -71,15 +72,25 @@ export function createBacklogCommand(options: BacklogCommandOptions = {}): Comma
     .command("list")
     .description("List epics")
     .option("--status <status>", "Filter by status")
-    .option("--include-hidden", "Include hidden epics (Orchestrator only)")
+    .option("--visible-only", "Show only currently visible epics")
+    .option("--include-hidden", "Deprecated: hidden epics are included by default")
     .option("--actor-id <actorId>", "Current actor id")
     .action(async (options) => {
       const listed = await service.list({
         status: options.status as BacklogEpicStatus | undefined,
-        includeHidden: Boolean(options.includeHidden),
+        includeHidden: !Boolean(options.visibleOnly),
         actorId: options.actorId,
       });
       console.log(JSON.stringify(listed.epics, null, 2));
+    });
+
+  epic
+    .command("ready")
+    .description("List startable epics filtered by visibility dependencies")
+    .option("--status <status>", "Filter by status")
+    .action(async (options) => {
+      const listed = await service.listReadyEpics(options.status as BacklogEpicStatus | undefined);
+      console.log(JSON.stringify(listed, null, 2));
     });
 
   epic
@@ -151,12 +162,13 @@ export function createBacklogCommand(options: BacklogCommandOptions = {}): Comma
     .command("list")
     .description("List backlog items")
     .option("--status <status>", "Filter by status")
-    .option("--include-hidden", "Include hidden items (Orchestrator only)")
+    .option("--visible-only", "Show only items linked to currently visible epics")
+    .option("--include-hidden", "Deprecated: hidden items are included by default")
     .option("--actor-id <actorId>", "Current actor id")
     .action(async (options) => {
       const listed = await service.list({
         status: options.status as BacklogItemStatus | undefined,
-        includeHidden: Boolean(options.includeHidden),
+        includeHidden: !Boolean(options.visibleOnly),
         actorId: options.actorId,
       });
       console.log(JSON.stringify(listed.items, null, 2));
@@ -290,6 +302,7 @@ function buildBacklogAgentUsageHelp(executableName: string): string {
     `${executableName} item add --epic E-001 --title \"...\"`,
     `${executableName} question add --title \"...\" --details \"...\"`,
     `${executableName} question answer --id Q-001 --answer \"...\"`,
+    `${executableName} epic ready`,
     `${executableName} list`,
     "```",
     "",

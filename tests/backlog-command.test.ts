@@ -43,4 +43,22 @@ describe("backlog command", () => {
     expect(output).toContain("answer");
     expect(output).toContain("delete");
   });
+
+  it("shows epic ready subcommand in help", async () => {
+    const command = createBacklogCli();
+    let output = "";
+    command
+      .exitOverride()
+      .configureOutput({
+        writeOut: (str) => {
+          output += str;
+        },
+        writeErr: (str) => {
+          output += str;
+        },
+      });
+
+    await expect(command.parseAsync(["epic", "--help"], { from: "user" })).rejects.toBeDefined();
+    expect(output).toContain("ready");
+  });
 });

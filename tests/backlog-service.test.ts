@@ -84,6 +84,8 @@ describe("BacklogService", () => {
 
     const listedByPm = await service.list({ includeHidden: true, actorId: "pm-agent" });
     expect(listedByPm.epics).toHaveLength(1);
+    const listedWithoutActor = await service.list({ includeHidden: true });
+    expect(listedWithoutActor.epics).toHaveLength(1);
   });
 
   it("validates acceptanceTestIds references", async () => {
@@ -215,5 +217,37 @@ describe("BacklogService", () => {
 
     const service = new BacklogService(backlogDir, acceptanceSpecPath, rolesPath);
     expect(await service.listQuestions()).toEqual([]);
+  });
+
+  it("lists only startable epics from visibility dependencies", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codefleet-backlog-"));
+    const backlogDir = path.join(tempDir, ".codefleet/data/backlog");
+    const acceptanceSpecPath = path.join(tempDir, ".codefleet/data/acceptance-testing/spec.json");
+    const rolesPath = path.join(tempDir, ".codefleet/roles.json");
+
+    await fs.mkdir(path.dirname(acceptanceSpecPath), { recursive: true });
+    await fs.writeFile(
+      acceptanceSpecPath,
+      JSON.stringify({ version: 1, updatedAt: "2026-01-01T00:00:00.000Z", tests: [] }, null, 2),
+      "utf8",
+    );
+    await fs.mkdir(path.dirname(rolesPath), { recursive: true });
+    await fs.writeFile(rolesPath, JSON.stringify({ agents: [] }, null, 2), "utf8");
+
+    const service = new BacklogService(backlogDir, acceptanceSpecPath, rolesPath);
+    const first = await service.addEpic({ title: "first", acceptanceTestIds: [] });
+    await service.addEpic({
+      title: "second",
+      acceptanceTestIds: [],
+      visibility: { type: "blocked-until-epic-complete", dependsOnEpicIds: [first.id] },
+    });
+
+    const readyBefore = await service.listReadyEpics();
+    expect(readyBefore.map((epic) => epic.id)).toEqual([first.id]);
+
+    await service.updateEpic({ id: first.id, status: "in-progress" });
+    await service.updateEpic({ id: first.id, status: "done" });
+    const readyAfter = await service.listReadyEpics();
+    expect(readyAfter.map((epic) => epic.id)).toEqual(["E-001", "E-002"]);
   });
 });
