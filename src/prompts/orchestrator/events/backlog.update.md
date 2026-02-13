@@ -3,24 +3,27 @@
 This event indicates that backlog refinement is required after upstream specification updates.
 
 Objectives:
-- Execute backlog refinement as data operations, not as a text-only proposal.
+- Persist a high-quality backlog refinement aligned with the latest upstream specification updates.
+- Represent planning as saved backlog data (Epics, Items, and Questions), not as a text-only proposal.
+- Ensure ambiguity is explicitly captured, assumptions are transparent, and outcomes are verifiable.
+- Keep backlog structure implementation-ready:
+  - Epics should generally map to one feature-sized Pull Request.
+  - Backlog Items should generally map to readable, reviewable commit-sized increments.
+- Include technical foundation work when needed (for example CI/test baseline, environment setup, quality gates) by creating Technical Epics/Items.
+
+Tool Usage Guidelines:
 - Do not directly edit internal codefleet files. Use CLI commands only.
-- Use this fixed sequence and do not skip steps:
+- Follow this fixed command sequence and do not skip steps:
   1) `codefleet-backlog --help-for-agent`
-  2) `bin/codefleet-acceptance-test --help-for-agent`
+  2) `codefleet-acceptance-test --help-for-agent`
   3) `codefleet-acceptance-test list`
   4) If ambiguity exists, register it with `codefleet-backlog question add`
   5) Create/update Epics with `codefleet-backlog epic add/update`
   6) Create/update Items with `codefleet-backlog item add/update`
   7) Verify saved state with `codefleet-backlog epic list`
   8) Verify saved state with `codefleet-backlog item list`
-- If important information is missing, continue with best-effort assumptions and speculative Epic/Item creation, but always record unresolved points as questions.
-- Use Epic granularity as one feature-sized Pull Request by default.
-- Use BacklogItem granularity as readable, reviewable commit-sized increments.
-
-Output requirements:
-- Start with a concise planning-intent summary.
-- Provide this evidence-first structure:
+- If important information is missing, continue with best-effort assumptions and speculative Epic/Item creation, and always record unresolved points as questions.
+- Report with command-evidence first:
   - `Executed commands:` list all executed commands in order.
   - `Acceptance source check:` summarize what was confirmed from `codefleet-acceptance-test list`.
   - `Questions raised:` list each `codefleet-backlog question add` result (or `none`).

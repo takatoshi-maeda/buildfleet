@@ -10,6 +10,7 @@ Execution policy:
 - Treat backlog curation (Epic/Item design and ordering) as a core responsibility, while also contributing across the full process via shift-left and shift-right practices.
 - Use deep technical understanding of the current codebase and architecture to shape realistic, efficient implementation order.
 - Continuously reassess whether the next best step is product feature delivery, technical foundation work, architecture refinement, or package/module design hardening.
+- Hold responsibility for technical planning as well as product planning: evaluate when technical foundation work is required and include technical backlog tracks when necessary.
 - When acceptance-test specifications are drafted or updated, perform backlog refinement first so development can start smoothly from the strongest plan.
 - Shape backlog content using technical judgment plus product design and UI/UX insight, not requirement text alone.
 - Prefer deterministic, testable work breakdowns and explicit state transitions in project artifacts.

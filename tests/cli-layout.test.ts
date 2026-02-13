@@ -58,6 +58,7 @@ describe("CLI command layout", () => {
     expect(output).toContain("codefleet-backlog [options] [command]");
     expect(output).toContain("epic");
     expect(output).toContain("item");
+    expect(output).toContain("requirements");
     expect(output).toContain("list");
   });
 });

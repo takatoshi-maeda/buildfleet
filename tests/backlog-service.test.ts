@@ -250,4 +250,59 @@ describe("BacklogService", () => {
     const readyAfter = await service.listReadyEpics();
     expect(readyAfter.map((epic) => epic.id)).toEqual(["E-001", "E-002"]);
   });
+
+  it("supports kind classification and filtering for epics/items", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codefleet-backlog-"));
+    const backlogDir = path.join(tempDir, ".codefleet/data/backlog");
+    const acceptanceSpecPath = path.join(tempDir, ".codefleet/data/acceptance-testing/spec.json");
+    const rolesPath = path.join(tempDir, ".codefleet/roles.json");
+
+    await fs.mkdir(path.dirname(acceptanceSpecPath), { recursive: true });
+    await fs.writeFile(
+      acceptanceSpecPath,
+      JSON.stringify({ version: 1, updatedAt: "2026-01-01T00:00:00.000Z", tests: [] }, null, 2),
+      "utf8",
+    );
+    await fs.mkdir(path.dirname(rolesPath), { recursive: true });
+    await fs.writeFile(rolesPath, JSON.stringify({ agents: [] }, null, 2), "utf8");
+
+    const service = new BacklogService(backlogDir, acceptanceSpecPath, rolesPath);
+    const productEpic = await service.addEpic({ title: "product epic", acceptanceTestIds: [] });
+    const technicalEpic = await service.addEpic({ title: "technical epic", kind: "technical", acceptanceTestIds: [] });
+    await service.addItem({ epicId: productEpic.id, title: "product item", acceptanceTestIds: [] });
+    await service.addItem({ epicId: technicalEpic.id, title: "technical item", kind: "technical", acceptanceTestIds: [] });
+
+    const listedAll = await service.list();
+    expect(listedAll.epics.map((epic) => epic.kind)).toEqual(["product", "technical"]);
+    expect(listedAll.items.map((item) => item.kind)).toEqual(["product", "technical"]);
+
+    const listedTechnical = await service.list({ kind: "technical", includeHidden: true });
+    expect(listedTechnical.epics.map((epic) => epic.id)).toEqual([technicalEpic.id]);
+    expect(listedTechnical.items.map((item) => item.epicId)).toEqual([technicalEpic.id]);
+  });
+
+  it("reads and writes single requirements text", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codefleet-backlog-"));
+    const backlogDir = path.join(tempDir, ".codefleet/data/backlog");
+    const acceptanceSpecPath = path.join(tempDir, ".codefleet/data/acceptance-testing/spec.json");
+    const rolesPath = path.join(tempDir, ".codefleet/roles.json");
+
+    await fs.mkdir(path.dirname(acceptanceSpecPath), { recursive: true });
+    await fs.writeFile(
+      acceptanceSpecPath,
+      JSON.stringify({ version: 1, updatedAt: "2026-01-01T00:00:00.000Z", tests: [] }, null, 2),
+      "utf8",
+    );
+    await fs.mkdir(path.dirname(rolesPath), { recursive: true });
+    await fs.writeFile(rolesPath, JSON.stringify({ agents: [] }, null, 2), "utf8");
+
+    const service = new BacklogService(backlogDir, acceptanceSpecPath, rolesPath);
+    expect(await service.readRequirements()).toBe("");
+
+    await service.writeRequirements("first requirement");
+    expect(await service.readRequirements()).toBe("first requirement");
+
+    await service.writeRequirements("second requirement");
+    expect(await service.readRequirements()).toBe("second requirement");
+  });
 });

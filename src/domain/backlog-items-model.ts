@@ -1,6 +1,7 @@
 export type BacklogEpicStatus = "todo" | "in-progress" | "done" | "blocked";
 export type BacklogItemStatus = "todo" | "wait-implementation" | "in-progress" | "done" | "blocked";
 export type BacklogQuestionStatus = "open" | "answered";
+export type BacklogWorkKind = "product" | "technical";
 
 export type VisibilityType = "always-visible" | "blocked-until-epic-complete";
 
@@ -12,6 +13,7 @@ export interface VisibilityRule {
 export interface BacklogEpic {
   id: string;
   title: string;
+  kind?: BacklogWorkKind;
   notes?: string[];
   status: BacklogEpicStatus;
   visibility: VisibilityRule;
@@ -23,6 +25,7 @@ export interface BacklogItem {
   id: string;
   epicId: string;
   title: string;
+  kind?: BacklogWorkKind;
   notes?: string[];
   status: BacklogItemStatus;
   acceptanceTestIds: string[];

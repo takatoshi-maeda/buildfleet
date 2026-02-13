@@ -3,6 +3,7 @@ import type {
   BacklogEpicStatus,
   BacklogItemStatus,
   BacklogQuestionStatus,
+  BacklogWorkKind,
   VisibilityType,
 } from "../../domain/backlog-items-model.js";
 import { BacklogService } from "../../domain/backlog/backlog-service.js";
@@ -31,12 +32,14 @@ export function createBacklogCommand(options: BacklogCommandOptions = {}): Comma
     .command("list")
     .description("List epics and items")
     .option("--status <status>", "Filter by status")
+    .option("--kind <kind>", "Filter by kind (product|technical)")
     .option("--visible-only", "Show only currently visible epics/items")
     .option("--include-hidden", "Deprecated: hidden items are included by default")
     .option("--actor-id <actorId>", "Current actor id")
     .action(async (options) => {
       const listed = await service.list({
         status: options.status as BacklogEpicStatus | BacklogItemStatus | undefined,
+        kind: options.kind as BacklogWorkKind | undefined,
         includeHidden: !Boolean(options.visibleOnly),
         actorId: options.actorId,
       });
@@ -47,6 +50,7 @@ export function createBacklogCommand(options: BacklogCommandOptions = {}): Comma
   epic
     .command("add")
     .requiredOption("--title <title>", "Epic title")
+    .option("--kind <kind>", "Epic kind (product|technical)", "product")
     .option("--note <note>", "Epic note", collectRepeatable, [])
     .option("--status <status>", "Epic status", "todo")
     .option("--visibility-type <type>", "always-visible or blocked-until-epic-complete", "always-visible")
@@ -56,6 +60,7 @@ export function createBacklogCommand(options: BacklogCommandOptions = {}): Comma
     .action(async (options) => {
       const epicResult = await service.addEpic({
         title: options.title,
+        kind: options.kind as BacklogWorkKind,
         notes: options.note,
         status: options.status as BacklogEpicStatus,
         visibility: {
@@ -72,12 +77,14 @@ export function createBacklogCommand(options: BacklogCommandOptions = {}): Comma
     .command("list")
     .description("List epics")
     .option("--status <status>", "Filter by status")
+    .option("--kind <kind>", "Filter by kind (product|technical)")
     .option("--visible-only", "Show only currently visible epics")
     .option("--include-hidden", "Deprecated: hidden epics are included by default")
     .option("--actor-id <actorId>", "Current actor id")
     .action(async (options) => {
       const listed = await service.list({
         status: options.status as BacklogEpicStatus | undefined,
+        kind: options.kind as BacklogWorkKind | undefined,
         includeHidden: !Boolean(options.visibleOnly),
         actorId: options.actorId,
       });
@@ -97,6 +104,7 @@ export function createBacklogCommand(options: BacklogCommandOptions = {}): Comma
     .command("update")
     .requiredOption("--id <id>", "Epic id")
     .option("--title <title>", "Epic title")
+    .option("--kind <kind>", "Epic kind (product|technical)")
     .option("--add-note <note>", "Append epic note", collectRepeatable, [])
     .option("--remove-note <note>", "Remove epic note by exact match", collectRepeatable, [])
     .option("--status <status>", "Epic status")
@@ -116,6 +124,7 @@ export function createBacklogCommand(options: BacklogCommandOptions = {}): Comma
       const updated = await service.updateEpic({
         id: options.id,
         title: options.title,
+        kind: options.kind as BacklogWorkKind | undefined,
         addNotes: options.addNote,
         removeNotes: options.removeNote,
         status: options.status as BacklogEpicStatus | undefined,
@@ -142,6 +151,7 @@ export function createBacklogCommand(options: BacklogCommandOptions = {}): Comma
     .command("add")
     .requiredOption("--epic <epicId>", "Epic id")
     .requiredOption("--title <title>", "Item title")
+    .option("--kind <kind>", "Item kind (product|technical)", "product")
     .option("--note <note>", "Item note", collectRepeatable, [])
     .option("--status <status>", "Item status", "todo")
     .option("--acceptance-test <testId>", "Acceptance test id", collectRepeatable, [])
@@ -150,6 +160,7 @@ export function createBacklogCommand(options: BacklogCommandOptions = {}): Comma
       const added = await service.addItem({
         epicId: options.epic,
         title: options.title,
+        kind: options.kind as BacklogWorkKind,
         notes: options.note,
         status: options.status as BacklogItemStatus,
         acceptanceTestIds: options.acceptanceTest,
@@ -162,12 +173,14 @@ export function createBacklogCommand(options: BacklogCommandOptions = {}): Comma
     .command("list")
     .description("List backlog items")
     .option("--status <status>", "Filter by status")
+    .option("--kind <kind>", "Filter by kind (product|technical)")
     .option("--visible-only", "Show only items linked to currently visible epics")
     .option("--include-hidden", "Deprecated: hidden items are included by default")
     .option("--actor-id <actorId>", "Current actor id")
     .action(async (options) => {
       const listed = await service.list({
         status: options.status as BacklogItemStatus | undefined,
+        kind: options.kind as BacklogWorkKind | undefined,
         includeHidden: !Boolean(options.visibleOnly),
         actorId: options.actorId,
       });
@@ -178,6 +191,7 @@ export function createBacklogCommand(options: BacklogCommandOptions = {}): Comma
     .command("update")
     .requiredOption("--id <id>", "Item id")
     .option("--title <title>", "Item title")
+    .option("--kind <kind>", "Item kind (product|technical)")
     .option("--add-note <note>", "Append item note", collectRepeatable, [])
     .option("--remove-note <note>", "Remove item note by exact match", collectRepeatable, [])
     .option("--status <status>", "Item status")
@@ -188,6 +202,7 @@ export function createBacklogCommand(options: BacklogCommandOptions = {}): Comma
       const updated = await service.updateItem({
         id: options.id,
         title: options.title,
+        kind: options.kind as BacklogWorkKind | undefined,
         addNotes: options.addNote,
         removeNotes: options.removeNote,
         status: options.status as BacklogItemStatus | undefined,
@@ -276,6 +291,23 @@ export function createBacklogCommand(options: BacklogCommandOptions = {}): Comma
       console.log(`deleted question: ${options.id}`);
     });
 
+  const requirements = cmd.command("requirements").description("Manage shared requirements text");
+  requirements
+    .command("write")
+    .requiredOption("--text <text>", "Requirements text")
+    .action(async (options) => {
+      const updated = await service.writeRequirements(options.text);
+      console.log(updated);
+    });
+
+  requirements
+    .command("read")
+    .description("Read shared requirements text")
+    .action(async () => {
+      const text = await service.readRequirements();
+      console.log(text);
+    });
+
   return cmd;
 }
 
@@ -298,7 +330,8 @@ function buildBacklogAgentUsageHelp(executableName: string): string {
     "  - Register open questions as soon as planning uncertainty is detected, then answer/close them explicitly.",
     "- Key commands:",
     "```bash",
-    `${executableName} epic add --title \"...\" --visibility-type always-visible`,
+    `${executableName} epic add --title \"...\" --kind product --visibility-type always-visible`,
+    `${executableName} epic add --title \"...\" --kind technical --visibility-type always-visible`,
     `${executableName} item add --epic E-001 --title \"...\"`,
     `${executableName} question add --title \"...\" --details \"...\"`,
     `${executableName} question answer --id Q-001 --answer \"...\"`,
@@ -315,7 +348,7 @@ function buildBacklogAgentUsageHelp(executableName: string): string {
     "- Key commands:",
     "```bash",
     `${executableName} item list --status in-progress`,
-    `${executableName} item update --id I-001 --status done --add-note \"...\"`,
+    `${executableName} item update --id I-001 --kind technical --status done --add-note \"...\"`,
     `${executableName} question list --status open`,
     `${executableName} question answer --id Q-001 --answer \"...\"`,
     "```",

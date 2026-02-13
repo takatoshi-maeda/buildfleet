@@ -11,6 +11,7 @@ import type {
   BacklogItemStatus,
   BacklogQuestion,
   BacklogQuestionStatus,
+  BacklogWorkKind,
   VisibilityRule,
 } from "../backlog-items-model.js";
 import type { Roles } from "../roles-model.js";
@@ -27,12 +28,14 @@ type AgentRole = "Orchestrator" | "Developer" | "Gatekeeper";
 
 interface ListInput {
   status?: BacklogEpicStatus | BacklogItemStatus;
+  kind?: BacklogWorkKind;
   includeHidden?: boolean;
   actorId?: string;
 }
 
 interface AddEpicInput {
   title: string;
+  kind?: BacklogWorkKind;
   notes?: string[];
   status?: BacklogEpicStatus;
   visibility?: VisibilityRule;
@@ -43,6 +46,7 @@ interface AddEpicInput {
 interface UpdateEpicInput {
   id: string;
   title?: string;
+  kind?: BacklogWorkKind;
   addNotes?: string[];
   removeNotes?: string[];
   status?: BacklogEpicStatus;
@@ -55,6 +59,7 @@ interface UpdateEpicInput {
 interface AddItemInput {
   epicId: string;
   title: string;
+  kind?: BacklogWorkKind;
   notes?: string[];
   status?: BacklogItemStatus;
   acceptanceTestIds: string[];
@@ -64,6 +69,7 @@ interface AddItemInput {
 interface UpdateItemInput {
   id: string;
   title?: string;
+  kind?: BacklogWorkKind;
   addNotes?: string[];
   removeNotes?: string[];
   status?: BacklogItemStatus;
@@ -96,6 +102,7 @@ type NormalizedBacklogItems = Omit<BacklogItems, "questions"> & { questions: Bac
 
 export class BacklogService {
   private readonly backlogDir: string;
+  private readonly requirementsPath: string;
   private readonly itemsRepository: JsonRepository<BacklogItems>;
   private readonly acceptanceSpecRepository: JsonRepository<AcceptanceTestingSpec>;
   private readonly rolesRepository: JsonRepository<Roles>;
@@ -106,6 +113,7 @@ export class BacklogService {
     rolesPath: string = DEFAULT_ROLES_PATH,
   ) {
     this.backlogDir = backlogDir;
+    this.requirementsPath = path.join(backlogDir, "requirements.txt");
     this.itemsRepository = new JsonRepository<BacklogItems>(
       path.join(backlogDir, "items.json"),
       SCHEMA_PATHS.backlogItems,
@@ -115,6 +123,23 @@ export class BacklogService {
       SCHEMA_PATHS.acceptanceTestingSpec,
     );
     this.rolesRepository = new JsonRepository<Roles>(rolesPath, SCHEMA_PATHS.roles);
+  }
+
+  async readRequirements(): Promise<string> {
+    try {
+      return await fs.readFile(this.requirementsPath, "utf8");
+    } catch (error) {
+      if (isNodeError(error) && error.code === "ENOENT") {
+        return "";
+      }
+      throw error;
+    }
+  }
+
+  async writeRequirements(text: string): Promise<string> {
+    await fs.mkdir(this.backlogDir, { recursive: true });
+    await fs.writeFile(this.requirementsPath, text, "utf8");
+    return text;
   }
 
   async list(input: ListInput = {}): Promise<BacklogItems> {
@@ -139,10 +164,16 @@ export class BacklogService {
     );
 
     const epics = items.epics.filter(
-      (epic) => visibleEpicIds.has(epic.id) && (!input.status || epic.status === input.status),
+      (epic) =>
+        visibleEpicIds.has(epic.id) &&
+        (!input.status || epic.status === input.status) &&
+        (!input.kind || epic.kind === input.kind),
     );
     const backlogItems = items.items.filter(
-      (item) => visibleEpicIds.has(item.epicId) && (!input.status || item.status === input.status),
+      (item) =>
+        visibleEpicIds.has(item.epicId) &&
+        (!input.status || item.status === input.status) &&
+        (!input.kind || item.kind === input.kind),
     );
 
     return { ...items, epics, items: backlogItems, questions: [...items.questions] };
@@ -163,6 +194,7 @@ export class BacklogService {
     const epic: BacklogEpic = {
       id: nextEpicId(items.epics),
       title: input.title,
+      kind: input.kind ?? "product",
       notes: unique(input.notes ?? []),
       status: input.status ?? "todo",
       visibility: input.visibility ?? defaultVisibility(),
@@ -197,6 +229,9 @@ export class BacklogService {
 
     if (input.title !== undefined) {
       epic.title = input.title;
+    }
+    if (input.kind !== undefined) {
+      epic.kind = input.kind;
     }
 
     if (input.addNotes || input.removeNotes) {
@@ -252,6 +287,7 @@ export class BacklogService {
       id: nextItemId(items.items),
       epicId: input.epicId,
       title: input.title,
+      kind: input.kind ?? "product",
       notes: unique(input.notes ?? []),
       status: input.status ?? "todo",
       acceptanceTestIds: unique(input.acceptanceTestIds),
@@ -285,6 +321,9 @@ export class BacklogService {
 
     if (input.title !== undefined) {
       item.title = input.title;
+    }
+    if (input.kind !== undefined) {
+      item.kind = input.kind;
     }
 
     if (input.addNotes || input.removeNotes) {
@@ -527,6 +566,8 @@ function nextQuestionId(questions: BacklogQuestion[]): string {
 function normalizeBacklogItems(items: BacklogItems): NormalizedBacklogItems {
   return {
     ...items,
+    epics: items.epics.map((epic) => ({ ...epic, kind: epic.kind ?? "product" })),
+    items: items.items.map((item) => ({ ...item, kind: item.kind ?? "product" })),
     questions: items.questions ? [...items.questions] : [],
   };
 }
@@ -539,4 +580,8 @@ function isVisible(epic: BacklogEpic, epicsById: Map<string, BacklogEpic>): bool
     return true;
   }
   return epic.visibility.dependsOnEpicIds.every((id) => epicsById.get(id)?.status === "done");
+}
+
+function isNodeError(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error;
 }
