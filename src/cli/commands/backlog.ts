@@ -1,5 +1,10 @@
 import { Command } from "commander";
-import type { BacklogEpicStatus, BacklogItemStatus, VisibilityType } from "../../domain/backlog-items-model.js";
+import type {
+  BacklogEpicStatus,
+  BacklogItemStatus,
+  BacklogQuestionStatus,
+  VisibilityType,
+} from "../../domain/backlog-items-model.js";
 import { BacklogService } from "../../domain/backlog/backlog-service.js";
 
 interface BacklogCommandOptions {
@@ -190,6 +195,75 @@ export function createBacklogCommand(options: BacklogCommandOptions = {}): Comma
       console.log(`deleted item: ${options.id}`);
     });
 
+  const question = cmd.command("question").description("Manage backlog questions");
+  question
+    .command("add")
+    .requiredOption("--title <title>", "Question title")
+    .option("--details <details>", "Question details")
+    .option("--actor-id <actorId>", "Current actor id")
+    .action(async (options) => {
+      const added = await service.addQuestion({
+        title: options.title,
+        details: options.details,
+        actorId: options.actorId,
+      });
+      console.log(JSON.stringify(added, null, 2));
+    });
+
+  question
+    .command("list")
+    .description("List backlog questions")
+    .option("--status <status>", "Filter by status")
+    .action(async (options) => {
+      const listed = await service.listQuestions();
+      const filtered =
+        options.status === undefined
+          ? listed
+          : listed.filter((entry) => entry.status === (options.status as BacklogQuestionStatus));
+      console.log(JSON.stringify(filtered, null, 2));
+    });
+
+  question
+    .command("update")
+    .requiredOption("--id <id>", "Question id")
+    .option("--title <title>", "Question title")
+    .option("--details <details>", "Question details")
+    .option("--status <status>", "Question status")
+    .option("--actor-id <actorId>", "Current actor id")
+    .action(async (options) => {
+      const updated = await service.updateQuestion({
+        id: options.id,
+        title: options.title,
+        details: options.details,
+        status: options.status as BacklogQuestionStatus | undefined,
+        actorId: options.actorId,
+      });
+      console.log(JSON.stringify(updated, null, 2));
+    });
+
+  question
+    .command("answer")
+    .requiredOption("--id <id>", "Question id")
+    .requiredOption("--answer <answer>", "Question answer")
+    .option("--actor-id <actorId>", "Current actor id")
+    .action(async (options) => {
+      const updated = await service.answerQuestion({
+        id: options.id,
+        answer: options.answer,
+        actorId: options.actorId,
+      });
+      console.log(JSON.stringify(updated, null, 2));
+    });
+
+  question
+    .command("delete")
+    .requiredOption("--id <id>", "Question id")
+    .option("--actor-id <actorId>", "Current actor id")
+    .action(async (options) => {
+      await service.deleteQuestion(options.id, options.actorId);
+      console.log(`deleted question: ${options.id}`);
+    });
+
   return cmd;
 }
 
@@ -209,10 +283,13 @@ function buildBacklogAgentUsageHelp(executableName: string): string {
     "- Recommended usage:",
     "  - Create epics first, then add items linked to the right epic.",
     "  - Use visibility/dependency settings to prevent agents from starting blocked work.",
+    "  - Register open questions as soon as planning uncertainty is detected, then answer/close them explicitly.",
     "- Key commands:",
     "```bash",
     `${executableName} epic add --title \"...\" --visibility-type always-visible`,
     `${executableName} item add --epic E-001 --title \"...\"`,
+    `${executableName} question add --title \"...\" --details \"...\"`,
+    `${executableName} question answer --id Q-001 --answer \"...\"`,
     `${executableName} list`,
     "```",
     "",
@@ -221,10 +298,13 @@ function buildBacklogAgentUsageHelp(executableName: string): string {
     "- Recommended usage:",
     "  - Inspect epic/item status before starting implementation.",
     "  - Update item status and notes to leave a clear handoff trail.",
+    "  - Review and answer implementation questions when decisions become clear during coding.",
     "- Key commands:",
     "```bash",
     `${executableName} item list --status in-progress`,
     `${executableName} item update --id I-001 --status done --add-note \"...\"`,
+    `${executableName} question list --status open`,
+    `${executableName} question answer --id Q-001 --answer \"...\"`,
     "```",
     "",
     "### Gatekeeper",
@@ -232,10 +312,13 @@ function buildBacklogAgentUsageHelp(executableName: string): string {
     "- Recommended usage:",
     "  - Reopen items when acceptance verification fails.",
     "  - Confirm linked epics/items are consistent with test and review outcomes.",
+    "  - Raise unresolved quality questions and verify they are answered before closure.",
     "- Key commands:",
     "```bash",
     `${executableName} item update --id I-001 --status in-progress --reopen`,
     `${executableName} epic list --status done`,
+    `${executableName} question add --title \"...\" --details \"...\"`,
+    `${executableName} question list --status open`,
     "```",
   ].join("\n");
 }

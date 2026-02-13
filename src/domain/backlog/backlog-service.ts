@@ -9,6 +9,8 @@ import type {
   BacklogItem,
   BacklogItems,
   BacklogItemStatus,
+  BacklogQuestion,
+  BacklogQuestionStatus,
   VisibilityRule,
 } from "../backlog-items-model.js";
 import type { Roles } from "../roles-model.js";
@@ -70,6 +72,28 @@ interface UpdateItemInput {
   actorId?: string;
 }
 
+interface AddQuestionInput {
+  title: string;
+  details?: string;
+  actorId?: string;
+}
+
+interface UpdateQuestionInput {
+  id: string;
+  title?: string;
+  details?: string;
+  status?: BacklogQuestionStatus;
+  actorId?: string;
+}
+
+interface AnswerQuestionInput {
+  id: string;
+  answer: string;
+  actorId?: string;
+}
+
+type NormalizedBacklogItems = Omit<BacklogItems, "questions"> & { questions: BacklogQuestion[] };
+
 export class BacklogService {
   private readonly backlogDir: string;
   private readonly itemsRepository: JsonRepository<BacklogItems>;
@@ -119,7 +143,7 @@ export class BacklogService {
       (item) => visibleEpicIds.has(item.epicId) && (!input.status || item.status === input.status),
     );
 
-    return { ...items, epics, items: backlogItems };
+    return { ...items, epics, items: backlogItems, questions: [...items.questions] };
   }
 
   async addEpic(input: AddEpicInput): Promise<BacklogEpic> {
@@ -281,13 +305,90 @@ export class BacklogService {
     await this.persistWithChangeLog(items, await this.resolveRole(actorId), [`- item deleted: ${id}`]);
   }
 
-  private async getOrInitializeItems(): Promise<BacklogItems> {
+  async listQuestions(): Promise<BacklogQuestion[]> {
+    const items = await this.getOrInitializeItems();
+    return [...items.questions];
+  }
+
+  async addQuestion(input: AddQuestionInput): Promise<BacklogQuestion> {
+    const items = await this.getOrInitializeItems();
+    const now = new Date().toISOString();
+    const question: BacklogQuestion = {
+      id: nextQuestionId(items.questions),
+      title: input.title,
+      details: input.details,
+      status: "open",
+      updatedAt: now,
+    };
+    items.questions.push(question);
+    items.updatedAt = now;
+    await this.persistWithChangeLog(items, await this.resolveRole(input.actorId), [`- question added: ${question.id}`]);
+    return question;
+  }
+
+  async updateQuestion(input: UpdateQuestionInput): Promise<BacklogQuestion> {
+    const items = await this.getOrInitializeItems();
+    const question = items.questions.find((value) => value.id === input.id);
+    if (!question) {
+      throw new CodefleetError("ERR_NOT_FOUND", `question not found: ${input.id}`);
+    }
+
+    if (input.title !== undefined) {
+      question.title = input.title;
+    }
+    if (input.details !== undefined) {
+      question.details = input.details;
+    }
+    if (input.status !== undefined) {
+      question.status = input.status;
+      if (input.status === "open") {
+        question.answer = undefined;
+      }
+    }
+
+    const now = new Date().toISOString();
+    question.updatedAt = now;
+    items.updatedAt = now;
+    await this.persistWithChangeLog(items, await this.resolveRole(input.actorId), [`- question updated: ${question.id}`]);
+    return question;
+  }
+
+  async answerQuestion(input: AnswerQuestionInput): Promise<BacklogQuestion> {
+    const items = await this.getOrInitializeItems();
+    const question = items.questions.find((value) => value.id === input.id);
+    if (!question) {
+      throw new CodefleetError("ERR_NOT_FOUND", `question not found: ${input.id}`);
+    }
+
+    question.status = "answered";
+    question.answer = input.answer;
+    const now = new Date().toISOString();
+    question.updatedAt = now;
+    items.updatedAt = now;
+    await this.persistWithChangeLog(items, await this.resolveRole(input.actorId), [`- question answered: ${question.id}`]);
+    return question;
+  }
+
+  async deleteQuestion(id: string, actorId?: string): Promise<void> {
+    const items = await this.getOrInitializeItems();
+    const index = items.questions.findIndex((question) => question.id === id);
+    if (index === -1) {
+      throw new CodefleetError("ERR_NOT_FOUND", `question not found: ${id}`);
+    }
+
+    items.questions.splice(index, 1);
+    items.updatedAt = new Date().toISOString();
+    await this.persistWithChangeLog(items, await this.resolveRole(actorId), [`- question deleted: ${id}`]);
+  }
+
+  private async getOrInitializeItems(): Promise<NormalizedBacklogItems> {
     try {
-      return await this.itemsRepository.get();
+      const persisted = await this.itemsRepository.get();
+      return normalizeBacklogItems(persisted);
     } catch (error) {
       if (error instanceof CodefleetError && error.code === "ERR_NOT_FOUND") {
         const now = new Date().toISOString();
-        const initial: BacklogItems = { version: 1, updatedAt: now, epics: [], items: [] };
+        const initial: NormalizedBacklogItems = { version: 1, updatedAt: now, epics: [], items: [], questions: [] };
         await this.itemsRepository.save(initial);
         return initial;
       }
@@ -401,6 +502,25 @@ function nextItemId(items: BacklogItem[]): string {
   }, 0);
 
   return `I-${String(maxSequence + 1).padStart(3, "0")}`;
+}
+
+function nextQuestionId(questions: BacklogQuestion[]): string {
+  const maxSequence = questions.reduce((max, question) => {
+    const matched = /^Q-(\d+)$/.exec(question.id);
+    if (!matched) {
+      return max;
+    }
+    return Math.max(max, Number(matched[1]));
+  }, 0);
+
+  return `Q-${String(maxSequence + 1).padStart(3, "0")}`;
+}
+
+function normalizeBacklogItems(items: BacklogItems): NormalizedBacklogItems {
+  return {
+    ...items,
+    questions: items.questions ? [...items.questions] : [],
+  };
 }
 
 function isVisible(epic: BacklogEpic, epicsById: Map<string, BacklogEpic>): boolean {

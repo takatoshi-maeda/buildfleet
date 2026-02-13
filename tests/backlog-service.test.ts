@@ -151,4 +151,69 @@ describe("BacklogService", () => {
     expect(updatedEpicAgain.notes).toEqual(["epic note 2", "epic note 3"]);
     expect(updatedItemAgain.notes).toEqual(["item note 2", "item note 3"]);
   });
+
+  it("supports backlog question add/list/update/answer/delete", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codefleet-backlog-"));
+    const backlogDir = path.join(tempDir, ".codefleet/data/backlog");
+    const acceptanceSpecPath = path.join(tempDir, ".codefleet/data/acceptance-testing/spec.json");
+    const rolesPath = path.join(tempDir, ".codefleet/roles.json");
+
+    await fs.mkdir(path.dirname(acceptanceSpecPath), { recursive: true });
+    await fs.writeFile(
+      acceptanceSpecPath,
+      JSON.stringify({ version: 1, updatedAt: "2026-01-01T00:00:00.000Z", tests: [] }, null, 2),
+      "utf8",
+    );
+    await fs.mkdir(path.dirname(rolesPath), { recursive: true });
+    await fs.writeFile(rolesPath, JSON.stringify({ agents: [] }, null, 2), "utf8");
+
+    const service = new BacklogService(backlogDir, acceptanceSpecPath, rolesPath);
+    const added = await service.addQuestion({ title: "Need API retry policy?", details: "timeout/retry numbers" });
+    expect(added.id).toBe("Q-001");
+    expect(added.status).toBe("open");
+
+    const listed = await service.listQuestions();
+    expect(listed).toHaveLength(1);
+    expect(listed[0]?.title).toBe("Need API retry policy?");
+
+    const updated = await service.updateQuestion({ id: added.id, title: "Need retry policy?", status: "open" });
+    expect(updated.title).toBe("Need retry policy?");
+
+    const answered = await service.answerQuestion({ id: added.id, answer: "Use exponential backoff with 3 retries." });
+    expect(answered.status).toBe("answered");
+    expect(answered.answer).toContain("exponential backoff");
+
+    await service.deleteQuestion(added.id);
+    expect(await service.listQuestions()).toHaveLength(0);
+  });
+
+  it("normalizes backlog items without questions field", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codefleet-backlog-"));
+    const backlogDir = path.join(tempDir, ".codefleet/data/backlog");
+    const acceptanceSpecPath = path.join(tempDir, ".codefleet/data/acceptance-testing/spec.json");
+    const rolesPath = path.join(tempDir, ".codefleet/roles.json");
+    const backlogItemsPath = path.join(backlogDir, "items.json");
+
+    await fs.mkdir(path.dirname(acceptanceSpecPath), { recursive: true });
+    await fs.writeFile(
+      acceptanceSpecPath,
+      JSON.stringify({ version: 1, updatedAt: "2026-01-01T00:00:00.000Z", tests: [] }, null, 2),
+      "utf8",
+    );
+    await fs.mkdir(path.dirname(rolesPath), { recursive: true });
+    await fs.writeFile(rolesPath, JSON.stringify({ agents: [] }, null, 2), "utf8");
+    await fs.mkdir(path.dirname(backlogItemsPath), { recursive: true });
+    await fs.writeFile(
+      backlogItemsPath,
+      JSON.stringify(
+        { version: 1, updatedAt: "2026-01-01T00:00:00.000Z", epics: [], items: [] },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+
+    const service = new BacklogService(backlogDir, acceptanceSpecPath, rolesPath);
+    expect(await service.listQuestions()).toEqual([]);
+  });
 });

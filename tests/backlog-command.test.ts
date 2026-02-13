@@ -17,6 +17,30 @@ describe("backlog command", () => {
     expect(output).toContain("Gatekeeper");
     expect(output).toContain("codefleet-backlog epic add");
     expect(output).toContain("codefleet-backlog item update");
+    expect(output).toContain("codefleet-backlog question add");
+    expect(output).toContain("codefleet-backlog question answer");
     expect(output).not.toContain("codefleet codefleet-backlog");
+  });
+
+  it("shows question subcommands in help", async () => {
+    const command = createBacklogCli();
+    let output = "";
+    command
+      .exitOverride()
+      .configureOutput({
+        writeOut: (str) => {
+          output += str;
+        },
+        writeErr: (str) => {
+          output += str;
+        },
+      });
+
+    await expect(command.parseAsync(["question", "--help"], { from: "user" })).rejects.toBeDefined();
+    expect(output).toContain("add");
+    expect(output).toContain("list");
+    expect(output).toContain("update");
+    expect(output).toContain("answer");
+    expect(output).toContain("delete");
   });
 });
