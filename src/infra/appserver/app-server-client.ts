@@ -25,6 +25,7 @@ export interface StartTurnInput {
 
 export interface StartThreadInput {
   baseInstructions?: string;
+  networkAccess?: boolean;
 }
 
 export interface AppServerNotification {
@@ -76,6 +77,9 @@ type RpcNotificationMessage = {
 
 const AGENT_APPROVAL_POLICY = "never";
 const AGENT_SANDBOX_MODE = "workspace-write";
+const AGENT_MODEL = "gpt-5.3-codex";
+const AGENT_REASONING_EFFORT = "xhigh";
+const AGENT_THREAD_NETWORK_ACCESS_DEFAULT = true;
 const TURN_COMPLETION_TIMEOUT_MS = 30 * 60 * 1000;
 const MAX_COMPLETED_TURN_CACHE = 256;
 
@@ -145,10 +149,19 @@ export class AppServerClient {
 
   async startThread(agentId: string, input: StartThreadInput = {}): Promise<{ threadId: string; lastNotificationAt: string }> {
     const connection = this.requireConnection(agentId);
-    // Pin thread execution policy so command/file-change steps run non-interactively in workspace scope.
+    const networkAccess = input.networkAccess ?? AGENT_THREAD_NETWORK_ACCESS_DEFAULT;
+    // Pin thread defaults here so resumed work stays on the same model/policy without per-turn drift.
     const response = await sendRequest(connection, "thread/start", {
       approvalPolicy: AGENT_APPROVAL_POLICY,
       sandbox: AGENT_SANDBOX_MODE,
+      // app-server applies this config override to the thread's workspace-write sandbox defaults.
+      // We keep this explicit so outbound network enablement is controlled at thread bootstrap time.
+      config: {
+        sandbox_workspace_write: {
+          network_access: networkAccess,
+        },
+      },
+      model: AGENT_MODEL,
       baseInstructions: input.baseInstructions ?? null,
     });
     return {
@@ -159,11 +172,12 @@ export class AppServerClient {
 
   async resumeThread(agentId: string, threadId: string): Promise<{ threadId: string; lastNotificationAt: string }> {
     const connection = this.requireConnection(agentId);
-    // Keep policy consistent when resuming existing threads.
+    // Keep model/policy consistent when resuming existing threads.
     const response = await sendRequest(connection, "thread/resume", {
       threadId,
       approvalPolicy: AGENT_APPROVAL_POLICY,
       sandbox: AGENT_SANDBOX_MODE,
+      model: AGENT_MODEL,
     });
     return {
       threadId: parseThreadId(response, "thread/resume"),
@@ -176,6 +190,8 @@ export class AppServerClient {
     const response = await sendRequest(connection, "turn/start", {
       threadId: input.threadId,
       input: input.input,
+      model: AGENT_MODEL,
+      effort: AGENT_REASONING_EFFORT,
     });
     return {
       turnId: parseTurnId(response),
