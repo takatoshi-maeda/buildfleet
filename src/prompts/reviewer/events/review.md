@@ -25,6 +25,8 @@ Decision actions (must execute one path):
 - Pass:
   - `codefleet-backlog epic update --id {{epicId}} --status done`
 - Changes requested:
+  - Before updating status, append a detailed implementation note to the Epic that includes: failing behavior, reproducible steps, expected behavior, likely root cause, and concrete fix guidance for the implementer.
+  - `codefleet-backlog epic update --id {{epicId}} --add-note "<detailed changes-requested rationale and fix guidance>"`
   - `codefleet-backlog epic update --id {{epicId}} --status changes-requested`
 
 System behavior note:
