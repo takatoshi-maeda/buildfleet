@@ -24,6 +24,7 @@ const DEFAULT_BACKLOG_DIR = ".codefleet/data/backlog";
 const DEFAULT_ACCEPTANCE_SPEC_PATH = ".codefleet/data/acceptance-testing/spec.json";
 const DEFAULT_ROLES_PATH = ".codefleet/roles.json";
 const CHANGE_LOG_JSONL_PATH = "change_logs.jsonl";
+const READY_EPIC_STATUSES: BacklogEpicStatus[] = ["todo", "changes-requested", "failed"];
 
 type AgentRole = "Orchestrator" | "Developer" | "Gatekeeper" | "Reviewer";
 type JsonLogValue = string | number | boolean | null | JsonLogValue[] | { [key: string]: JsonLogValue };
@@ -196,7 +197,8 @@ export class BacklogService {
   async listReadyEpics(status?: BacklogEpicStatus): Promise<BacklogEpic[]> {
     const items = await this.getOrInitializeItems();
     const epicsById = new Map(items.epics.map((epic) => [epic.id, epic]));
-    return items.epics.filter((epic) => isVisible(epic, epicsById) && (!status || epic.status === status));
+    const targetStatuses = status ? [status] : READY_EPIC_STATUSES;
+    return items.epics.filter((epic) => isVisible(epic, epicsById) && targetStatuses.includes(epic.status));
   }
 
   async readEpic(input: ReadByIdInput): Promise<BacklogEpic> {
@@ -213,16 +215,15 @@ export class BacklogService {
     const epicsById = new Map(items.epics.map((epic) => [epic.id, epic]));
 
     // Implementation must remain serialized around the review gate: do not pick
-    // another todo epic while any epic is actively implemented, under review,
-    // or waiting for rework after review feedback.
+    // a new ready epic while any epic is actively implemented or under review.
     const hasActiveOrReviewingEpic = items.epics.some(
-      (epic) => epic.status === "in-progress" || epic.status === "in-review" || epic.status === "changes-requested",
+      (epic) => epic.status === "in-progress" || epic.status === "in-review",
     );
     if (hasActiveOrReviewingEpic) {
       return null;
     }
 
-    const candidate = items.epics.find((epic) => epic.status === "todo" && isVisible(epic, epicsById));
+    const candidate = items.epics.find((epic) => READY_EPIC_STATUSES.includes(epic.status) && isVisible(epic, epicsById));
     if (!candidate) {
       return null;
     }

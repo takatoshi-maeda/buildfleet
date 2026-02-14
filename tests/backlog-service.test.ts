@@ -266,7 +266,7 @@ describe("BacklogService", () => {
     expect(await service.listQuestions()).toEqual([]);
   });
 
-  it("lists only startable epics from visibility dependencies", async () => {
+  it("lists only ready epics from visibility dependencies", async () => {
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codefleet-backlog-"));
     const backlogDir = path.join(tempDir, ".codefleet/data/backlog");
     const acceptanceSpecPath = path.join(tempDir, ".codefleet/data/acceptance-testing/spec.json");
@@ -296,7 +296,32 @@ describe("BacklogService", () => {
     await service.updateEpic({ id: first.id, status: "in-review" });
     await service.updateEpic({ id: first.id, status: "done" });
     const readyAfter = await service.listReadyEpics();
-    expect(readyAfter.map((epic) => epic.id)).toEqual(["E-001", "E-002"]);
+    expect(readyAfter.map((epic) => epic.id)).toEqual(["E-002"]);
+  });
+
+  it("includes todo/changes-requested/failed in ready epics", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codefleet-backlog-"));
+    const backlogDir = path.join(tempDir, ".codefleet/data/backlog");
+    const acceptanceSpecPath = path.join(tempDir, ".codefleet/data/acceptance-testing/spec.json");
+    const rolesPath = path.join(tempDir, ".codefleet/roles.json");
+
+    await fs.mkdir(path.dirname(acceptanceSpecPath), { recursive: true });
+    await fs.writeFile(
+      acceptanceSpecPath,
+      JSON.stringify({ version: 1, updatedAt: "2026-01-01T00:00:00.000Z", tests: [] }, null, 2),
+      "utf8",
+    );
+    await fs.mkdir(path.dirname(rolesPath), { recursive: true });
+    await fs.writeFile(rolesPath, JSON.stringify({ agents: [] }, null, 2), "utf8");
+
+    const service = new BacklogService(backlogDir, acceptanceSpecPath, rolesPath);
+    const todo = await service.addEpic({ title: "todo", acceptanceTestIds: [], status: "todo" });
+    const rework = await service.addEpic({ title: "rework", acceptanceTestIds: [], status: "changes-requested" });
+    const failed = await service.addEpic({ title: "failed", acceptanceTestIds: [], status: "failed" });
+    await service.addEpic({ title: "done", acceptanceTestIds: [], status: "done" });
+
+    const ready = await service.listReadyEpics();
+    expect(ready.map((epic) => epic.id)).toEqual([todo.id, rework.id, failed.id]);
   });
 
   it("claims a single ready epic for implementation and removes it from ready(todo) candidates", async () => {
@@ -349,6 +374,30 @@ describe("BacklogService", () => {
 
     const claimed = await service.claimReadyEpicForImplementation("developer-1");
     expect(claimed).toBeNull();
+  });
+
+  it("claims changes-requested epic as ready for re-implementation", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codefleet-backlog-"));
+    const backlogDir = path.join(tempDir, ".codefleet/data/backlog");
+    const acceptanceSpecPath = path.join(tempDir, ".codefleet/data/acceptance-testing/spec.json");
+    const rolesPath = path.join(tempDir, ".codefleet/roles.json");
+
+    await fs.mkdir(path.dirname(acceptanceSpecPath), { recursive: true });
+    await fs.writeFile(
+      acceptanceSpecPath,
+      JSON.stringify({ version: 1, updatedAt: "2026-01-01T00:00:00.000Z", tests: [] }, null, 2),
+      "utf8",
+    );
+    await fs.mkdir(path.dirname(rolesPath), { recursive: true });
+    await fs.writeFile(rolesPath, JSON.stringify({ agents: [] }, null, 2), "utf8");
+
+    const service = new BacklogService(backlogDir, acceptanceSpecPath, rolesPath);
+    const rework = await service.addEpic({ title: "rework", acceptanceTestIds: [], status: "changes-requested" });
+    await service.addEpic({ title: "new", acceptanceTestIds: [], status: "todo" });
+
+    const claimed = await service.claimReadyEpicForImplementation("developer-1");
+    expect(claimed?.id).toBe(rework.id);
+    expect(claimed?.status).toBe("in-progress");
   });
 
   it("supports kind classification and filtering for epics/items", async () => {

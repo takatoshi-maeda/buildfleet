@@ -14,7 +14,7 @@ class BacklogServiceReadyEpicProbe implements ReadyEpicProbe {
 
   async hasReadyEpic(): Promise<boolean> {
     // For Developer wake-up we only care about epics that are ready to start now.
-    const readyEpics = await this.backlogService.listReadyEpics("todo");
+    const readyEpics = await this.backlogService.listReadyEpics();
     return readyEpics.length > 0;
   }
 }

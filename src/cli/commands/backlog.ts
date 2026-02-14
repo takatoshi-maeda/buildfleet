@@ -103,9 +103,9 @@ export function createBacklogCommand(options: BacklogCommandOptions = {}): Comma
 
   epic
     .command("ready")
-    .description("List startable epics with status=todo filtered by visibility dependencies")
+    .description("List startable epics (todo, changes-requested, failed) filtered by visibility dependencies")
     .action(async () => {
-      const listed = await service.listReadyEpics("todo");
+      const listed = await service.listReadyEpics();
       console.log(JSON.stringify(listed, null, 2));
     });
 
