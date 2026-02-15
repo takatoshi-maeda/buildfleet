@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { promises as fs } from "node:fs";
 import net from "node:net";
 import path from "node:path";
+import { createInterface } from "node:readline/promises";
 import { Command } from "commander";
 import type { AgentRuntime } from "../../domain/agent-runtime-model.js";
 import type { AppServerSession } from "../../domain/app-server-session-model.js";
@@ -22,6 +23,22 @@ import type { SystemEvent } from "../../events/router.js";
 
 interface FleetctlCommandOptions {
   commandName?: string;
+}
+
+interface FleetUpPreflightBacklogService {
+  list(input?: { includeHidden?: boolean }): Promise<{
+    epics: Array<{ id: string; status: string }>;
+    items: Array<{ id: string; status: string }>;
+  }>;
+  resetInProgressToTodo(actorId?: string): Promise<{ updatedEpicIds: string[]; updatedItemIds: string[] }>;
+}
+
+interface FleetUpPreflightDependencies {
+  backlogService: FleetUpPreflightBacklogService;
+  confirm: (message: string) => Promise<boolean | null>;
+  hasUncommittedChanges: () => Promise<boolean>;
+  hardReset: () => Promise<void>;
+  emit: (record: object) => void;
 }
 
 const SUPERVISOR_PID_PATH = path.join(".codefleet", "runtime", "supervisor.pid");
@@ -117,6 +134,7 @@ export function createFleetctlCommand(options: FleetctlCommandOptions = {}): Com
     .option("--gatekeepers <count>", "Number of Gatekeeper agents", "1")
     .option("--developers <count>", "Number of Developer agents", "1")
     .option("--reviewers <count>", "Number of Reviewer agents", "1")
+    .option("--skip-startup-preflight", "Skip internal startup preflight checks", false)
     .action(async (options) => {
       logMode = Boolean(options.verbose) ? "jsonl" : "human";
       const requestedAt = new Date().toISOString();
@@ -131,6 +149,20 @@ export function createFleetctlCommand(options: FleetctlCommandOptions = {}): Com
       const playwrightHost = parsePlaywrightHost(options.playwrightHost);
       const playwrightPort = parsePlaywrightPort(options.playwrightPort);
       const requestedPlaywrightServerUrl = buildPlaywrightServerUrl(playwrightHost, playwrightPort);
+      if (!Boolean(options.skipStartupPreflight)) {
+        await runFleetUpPreflight({
+          backlogService: new BacklogService(),
+        confirm: (message) =>
+          confirmPrompt({
+            input: process.stdin,
+            output: process.stderr,
+            message,
+          }),
+          hasUncommittedChanges: hasGitUncommittedChanges,
+          hardReset: runGitResetHard,
+          emit,
+        });
+      }
 
       if (Boolean(options.detached)) {
         const detachedPid = await spawnDetachedSupervisorProcess({
@@ -279,6 +311,65 @@ export function createFleetctlCommand(options: FleetctlCommandOptions = {}): Com
     });
 
   return cmd;
+}
+
+export async function runFleetUpPreflight(deps: FleetUpPreflightDependencies): Promise<void> {
+  const listed = await deps.backlogService.list({ includeHidden: true });
+  const inProgressEpicIds = listed.epics.filter((epic) => epic.status === "in-progress").map((epic) => epic.id);
+  const inProgressItemIds = listed.items.filter((item) => item.status === "in-progress").map((item) => item.id);
+  if (inProgressEpicIds.length > 0 || inProgressItemIds.length > 0) {
+    const confirmedBacklogReset = await deps.confirm(
+      `in-progress の Epic ${inProgressEpicIds.length}件 / Item ${inProgressItemIds.length}件を todo に戻します。実行しますか？ [y/N] `,
+    );
+    if (confirmedBacklogReset === null) {
+      deps.emit({
+        ts: new Date().toISOString(),
+        level: "warn",
+        event: "fleet.preflight.backlog_in_progress_reset.skipped_non_interactive",
+        inProgressEpicCount: inProgressEpicIds.length,
+        inProgressItemCount: inProgressItemIds.length,
+      });
+    } else if (!confirmedBacklogReset) {
+      throw new Error("fleet up cancelled: backlog in-progress reset was not confirmed.");
+    } else {
+      const reset = await deps.backlogService.resetInProgressToTodo();
+      deps.emit({
+        ts: new Date().toISOString(),
+        level: "warn",
+        event: "fleet.preflight.backlog_in_progress_reset",
+        updatedEpicCount: reset.updatedEpicIds.length,
+        updatedItemCount: reset.updatedItemIds.length,
+        updatedEpicIds: reset.updatedEpicIds,
+        updatedItemIds: reset.updatedItemIds,
+      });
+    }
+  }
+
+  const hasDirtyChanges = await deps.hasUncommittedChanges();
+  if (!hasDirtyChanges) {
+    return;
+  }
+
+  const confirmedGitReset = await deps.confirm(
+    "未コミットの変更を `git reset --hard` で破棄します。実行しますか？ [y/N] ",
+  );
+  if (confirmedGitReset === null) {
+    deps.emit({
+      ts: new Date().toISOString(),
+      level: "warn",
+      event: "fleet.preflight.git_reset_hard.skipped_non_interactive",
+    });
+    return;
+  }
+  if (!confirmedGitReset) {
+    throw new Error("fleet up cancelled: git reset --hard was not confirmed.");
+  }
+  await deps.hardReset();
+  deps.emit({
+    ts: new Date().toISOString(),
+    level: "warn",
+    event: "fleet.preflight.git_reset_hard",
+  });
 }
 
 function validateTargetSelection(all: boolean, role: AgentRole | undefined, commandName: string): void {
@@ -662,6 +753,82 @@ async function finalizeEpicExecutionStatus(
   });
 }
 
+async function confirmPrompt(input: {
+  input: NodeJS.ReadableStream & { isTTY?: boolean };
+  output: NodeJS.WritableStream;
+  message: string;
+}): Promise<boolean | null> {
+  if (!input.input.isTTY) {
+    return null;
+  }
+  const rl = createInterface({
+    input: input.input,
+    output: input.output,
+  });
+  try {
+    const answer = await rl.question(input.message);
+    return ["y", "yes"].includes(answer.trim().toLowerCase());
+  } finally {
+    rl.close();
+  }
+}
+
+async function hasGitUncommittedChanges(): Promise<boolean> {
+  if (!(await isInsideGitWorkTree())) {
+    return false;
+  }
+  const status = await runGitCommand(["status", "--porcelain"], { captureStdout: true });
+  return status.stdout.trim().length > 0;
+}
+
+async function runGitResetHard(): Promise<void> {
+  if (!(await isInsideGitWorkTree())) {
+    return;
+  }
+  await runGitCommand(["reset", "--hard"], { captureStdout: false });
+}
+
+async function isInsideGitWorkTree(): Promise<boolean> {
+  try {
+    const result = await runGitCommand(["rev-parse", "--is-inside-work-tree"], { captureStdout: true });
+    return result.stdout.trim() === "true";
+  } catch {
+    return false;
+  }
+}
+
+async function runGitCommand(
+  args: string[],
+  options: { captureStdout: boolean },
+): Promise<{ stdout: string }> {
+  return await new Promise<{ stdout: string }>((resolve, reject) => {
+    const child = spawn("git", args, {
+      stdio: options.captureStdout ? ["ignore", "pipe", "pipe"] : "inherit",
+    });
+    let stdout = "";
+    let stderr = "";
+    if (options.captureStdout) {
+      child.stdout?.setEncoding("utf8");
+      child.stderr?.setEncoding("utf8");
+      child.stdout?.on("data", (chunk: string) => {
+        stdout += chunk;
+      });
+      child.stderr?.on("data", (chunk: string) => {
+        stderr += chunk;
+      });
+    }
+    child.once("error", reject);
+    child.once("exit", (code) => {
+      if (code === 0) {
+        resolve({ stdout });
+        return;
+      }
+      const suffix = stderr.trim().length > 0 ? `: ${stderr.trim()}` : "";
+      reject(new Error(`git ${args.join(" ")} failed (exit ${code ?? "unknown"})${suffix}`));
+    });
+  });
+}
+
 function parsePositivePollIntervalMs(raw: unknown, optionName: string): number {
   const value = Number(raw);
   if (!Number.isFinite(value) || value <= 0) {
@@ -851,6 +1018,8 @@ async function spawnDetachedSupervisorProcess(input: {
   if (input.epicReadyPollIntervalMs !== DEFAULT_EPIC_READY_POLL_INTERVAL_MS) {
     args.push("--epic-ready-poll-interval-sec", String(input.epicReadyPollIntervalMs / 1_000));
   }
+  // Parent process already ran the interactive startup preflight.
+  args.push("--skip-startup-preflight");
   args.push("--playwright-host", input.playwrightHost, "--playwright-port", String(input.playwrightPort));
   const child = spawn(process.execPath, args, {
     detached: true,

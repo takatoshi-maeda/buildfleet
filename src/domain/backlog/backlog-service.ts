@@ -112,6 +112,11 @@ interface UpdateStatusAllTodoResult {
   updatedItemIds: string[];
 }
 
+interface ResetInProgressToTodoResult {
+  updatedEpicIds: string[];
+  updatedItemIds: string[];
+}
+
 type NormalizedBacklogItems = Omit<BacklogItems, "questions"> & { questions: BacklogQuestion[] };
 
 export class BacklogService {
@@ -279,6 +284,46 @@ export class BacklogService {
     const itemSummary = updatedItemIds.length > 0 ? ` (${updatedItemIds.join(", ")})` : "";
     await this.persistWithChangeLog(items, "backlog.update-status-all-todo", { actorId }, [
       "- epic/item statuses reset to todo",
+      `- epics updated: ${updatedEpicIds.length}${epicSummary}`,
+      `- items updated: ${updatedItemIds.length}${itemSummary}`,
+    ]);
+    return { updatedEpicIds, updatedItemIds };
+  }
+
+  async resetInProgressToTodo(actorId?: string): Promise<ResetInProgressToTodoResult> {
+    const items = await this.getOrInitializeItems();
+    const updatedEpicIds = items.epics.filter((epic) => epic.status === "in-progress").map((epic) => epic.id);
+    const updatedItemIds = items.items.filter((item) => item.status === "in-progress").map((item) => item.id);
+
+    if (updatedEpicIds.length === 0 && updatedItemIds.length === 0) {
+      return { updatedEpicIds, updatedItemIds };
+    }
+
+    const now = new Date().toISOString();
+    const updatedEpicIdSet = new Set(updatedEpicIds);
+    const updatedItemIdSet = new Set(updatedItemIds);
+    // Fleet startup reset is an operational safeguard. It intentionally bypasses
+    // regular transition rules and only rewinds currently-running work to todo.
+    for (const epic of items.epics) {
+      if (!updatedEpicIdSet.has(epic.id)) {
+        continue;
+      }
+      epic.status = "todo";
+      epic.updatedAt = now;
+    }
+    for (const item of items.items) {
+      if (!updatedItemIdSet.has(item.id)) {
+        continue;
+      }
+      item.status = "todo";
+      item.updatedAt = now;
+    }
+    items.updatedAt = now;
+
+    const epicSummary = updatedEpicIds.length > 0 ? ` (${updatedEpicIds.join(", ")})` : "";
+    const itemSummary = updatedItemIds.length > 0 ? ` (${updatedItemIds.join(", ")})` : "";
+    await this.persistWithChangeLog(items, "backlog.reset-in-progress-to-todo", { actorId }, [
+      "- in-progress epic/item statuses reset to todo",
       `- epics updated: ${updatedEpicIds.length}${epicSummary}`,
       `- items updated: ${updatedItemIds.length}${itemSummary}`,
     ]);

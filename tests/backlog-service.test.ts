@@ -555,6 +555,54 @@ describe("BacklogService", () => {
     expect(secondReset).toEqual({ updatedEpicIds: [], updatedItemIds: [] });
   });
 
+  it("resets only in-progress epic/item statuses to todo", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codefleet-backlog-"));
+    const backlogDir = path.join(tempDir, ".codefleet/data/backlog");
+    const acceptanceSpecPath = path.join(tempDir, ".codefleet/data/acceptance-testing/spec.json");
+    const rolesPath = path.join(tempDir, ".codefleet/roles.json");
+
+    await fs.mkdir(path.dirname(acceptanceSpecPath), { recursive: true });
+    await fs.writeFile(
+      acceptanceSpecPath,
+      JSON.stringify({ version: 1, updatedAt: "2026-01-01T00:00:00.000Z", tests: [] }, null, 2),
+      "utf8",
+    );
+    await fs.mkdir(path.dirname(rolesPath), { recursive: true });
+    await fs.writeFile(rolesPath, JSON.stringify({ agents: [] }, null, 2), "utf8");
+
+    const service = new BacklogService(backlogDir, acceptanceSpecPath, rolesPath);
+    const activeEpic = await service.addEpic({ title: "active epic", status: "in-progress", acceptanceTestIds: [] });
+    const doneEpic = await service.addEpic({ title: "done epic", status: "done", acceptanceTestIds: [] });
+    const activeItem = await service.addItem({
+      epicId: activeEpic.id,
+      title: "active item",
+      status: "in-progress",
+      acceptanceTestIds: [],
+    });
+    const blockedItem = await service.addItem({
+      epicId: doneEpic.id,
+      title: "blocked item",
+      status: "blocked",
+      acceptanceTestIds: [],
+    });
+
+    const reset = await service.resetInProgressToTodo();
+    expect(reset).toEqual({
+      updatedEpicIds: [activeEpic.id],
+      updatedItemIds: [activeItem.id],
+    });
+
+    const listed = await service.list({ includeHidden: true });
+    const listedActiveEpic = listed.epics.find((epic) => epic.id === activeEpic.id);
+    const listedDoneEpic = listed.epics.find((epic) => epic.id === doneEpic.id);
+    const listedActiveItem = listed.items.find((item) => item.id === activeItem.id);
+    const listedBlockedItem = listed.items.find((item) => item.id === blockedItem.id);
+    expect(listedActiveEpic?.status).toBe("todo");
+    expect(listedDoneEpic?.status).toBe("done");
+    expect(listedActiveItem?.status).toBe("todo");
+    expect(listedBlockedItem?.status).toBe("blocked");
+  });
+
   it("reads and writes single requirements text", async () => {
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codefleet-backlog-"));
     const backlogDir = path.join(tempDir, ".codefleet/data/backlog");
