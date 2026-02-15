@@ -25,7 +25,7 @@ export async function ensureStableBacklogSnapshot(backlogDir: string): Promise<v
 }
 
 async function latestChangeLogMtime(backlogDir: string): Promise<number> {
-  const changeLogPath = path.join(backlogDir, "change_logs.jsonl");
+  const changeLogPath = path.join(backlogDir, "change-logs.jsonl");
   try {
     const stat = await fs.stat(changeLogPath);
     return stat.mtimeMs;

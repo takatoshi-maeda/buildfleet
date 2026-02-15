@@ -6,12 +6,12 @@ import { BacklogService } from "../src/domain/backlog/backlog-service.js";
 import { CodefleetError } from "../src/shared/errors.js";
 
 describe("BacklogService", () => {
-  it("appends change history entries to change_logs.jsonl in chronological order", async () => {
+  it("appends change history entries to change-logs.jsonl in chronological order", async () => {
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codefleet-backlog-"));
     const backlogDir = path.join(tempDir, ".codefleet/data/backlog");
     const acceptanceSpecPath = path.join(tempDir, ".codefleet/data/acceptance-testing/spec.json");
     const rolesPath = path.join(tempDir, ".codefleet/roles.json");
-    const changeLogPath = path.join(backlogDir, "change_logs.jsonl");
+    const changeLogPath = path.join(backlogDir, "change-logs.jsonl");
 
     await fs.mkdir(path.dirname(acceptanceSpecPath), { recursive: true });
     await fs.writeFile(
@@ -89,7 +89,7 @@ describe("BacklogService", () => {
       actorId: "pm-agent",
     });
 
-    const changeLogPath = path.join(backlogDir, "change_logs.jsonl");
+    const changeLogPath = path.join(backlogDir, "change-logs.jsonl");
     await fs.unlink(changeLogPath);
 
     await expect(service.list({ status: "wait-implementation" })).rejects.toMatchObject<Partial<CodefleetError>>({

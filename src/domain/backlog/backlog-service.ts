@@ -23,7 +23,7 @@ import { ensureValidEpicStatusTransition, ensureValidItemStatusTransition } from
 const DEFAULT_BACKLOG_DIR = ".codefleet/data/backlog";
 const DEFAULT_ACCEPTANCE_SPEC_PATH = ".codefleet/data/acceptance-testing/spec.json";
 const DEFAULT_ROLES_PATH = ".codefleet/roles.json";
-const CHANGE_LOG_JSONL_PATH = "change_logs.jsonl";
+const CHANGE_LOG_JSONL_PATH = "change-logs.jsonl";
 const READY_EPIC_STATUSES: BacklogEpicStatus[] = ["todo", "changes-requested", "failed"];
 
 type AgentRole = "Orchestrator" | "Developer" | "Gatekeeper" | "Reviewer";
