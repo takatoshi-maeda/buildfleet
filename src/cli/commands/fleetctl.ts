@@ -351,7 +351,7 @@ export async function runFleetUpPreflight(deps: FleetUpPreflightDependencies): P
   }
 
   const confirmedGitReset = await deps.confirm(
-    "未コミットの変更を `git reset --hard` で破棄します。実行しますか？ [y/N] ",
+    "未コミット変更と新規ファイルを `git reset --hard && git clean -fd` で破棄します。実行しますか？ [y/N] ",
   );
   if (confirmedGitReset === null) {
     deps.emit({
@@ -786,6 +786,9 @@ async function runGitResetHard(): Promise<void> {
     return;
   }
   await runGitCommand(["reset", "--hard"], { captureStdout: false });
+  // reset --hard does not remove untracked files; clean is required to fully
+  // restore a pristine working tree before fleet startup.
+  await runGitCommand(["clean", "-fd"], { captureStdout: false });
 }
 
 async function isInsideGitWorkTree(): Promise<boolean> {

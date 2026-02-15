@@ -27,6 +27,7 @@ describe("runFleetUpPreflight", () => {
     });
 
     expect(confirm).toHaveBeenCalledTimes(2);
+    expect(confirm.mock.calls[1]?.[0]).toContain("git reset --hard && git clean -fd");
     expect(resetInProgressToTodo).toHaveBeenCalledTimes(1);
     expect(hardReset).toHaveBeenCalledTimes(1);
     expect(emit).toHaveBeenCalledWith(
