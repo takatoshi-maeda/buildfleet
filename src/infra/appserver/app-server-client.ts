@@ -92,7 +92,7 @@ export class AppServerClient {
   async startAgent(input: StartAgentInput): Promise<StartAgentResult> {
     // Role-specific prompts are passed through env to preserve a single startup entrypoint while
     // keeping role boot instructions explicit per lifecycle event trigger.
-    const child = spawn("codex", ["-a", "never", "-s", "workspace-write", "app-server"], {
+    const child = spawn("codex", ["-a", "never", "app-server"], {
       cwd: input.cwd,
       detached: input.detached,
       stdio: ["pipe", "pipe", "ignore"],
