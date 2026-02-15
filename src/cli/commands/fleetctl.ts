@@ -189,43 +189,40 @@ export function createFleetctlCommand(options: FleetctlCommandOptions = {}): Com
         });
       }
 
-      const playwrightServer = await startPlaywrightServer({ host: playwrightHost, port: playwrightPort }, emit);
       const queueWorker = new AgentEventQueueWorkerService();
       const queueService = new AgentEventQueueService();
+      const status = await service.up({
+        detached: false,
+        gatekeepers,
+        developers,
+        reviewers,
+        lang,
+        // Do not auto-start playwright run-server from fleetctl up. The URL can still
+        // point to an externally managed server (if one is already running).
+        playwrightServerUrl: requestedPlaywrightServerUrl,
+      });
+      for (const agent of status.agents) {
+        emitAgentRuntimeLog(agent, emit);
+      }
+
+      for (const session of status.sessions) {
+        emitSessionLog(session, emit);
+      }
+
+      emit({
+        ts: new Date().toISOString(),
+        level: "info",
+        event: "fleet.up.completed",
+        summary: status.summary,
+        agentCount: status.agents.length,
+        readySessionCount: status.sessions.filter((session) => session.status === "ready").length,
+      });
+
+      await writeSupervisorPid(process.pid);
       try {
-        const status = await service.up({
-          detached: false,
-          gatekeepers,
-          developers,
-          reviewers,
-          lang,
-          playwrightServerUrl: playwrightServer.url,
-        });
-        for (const agent of status.agents) {
-          emitAgentRuntimeLog(agent, emit);
-        }
-
-        for (const session of status.sessions) {
-          emitSessionLog(session, emit);
-        }
-
-        emit({
-          ts: new Date().toISOString(),
-          level: "info",
-          event: "fleet.up.completed",
-          summary: status.summary,
-          agentCount: status.agents.length,
-          readySessionCount: status.sessions.filter((session) => session.status === "ready").length,
-        });
-
-        await writeSupervisorPid(process.pid);
-        try {
-          await waitForShutdownSignal(service, queueWorker, queueService, emit, epicReadyPollIntervalMs);
-        } finally {
-          await removeSupervisorPidFile();
-        }
+        await waitForShutdownSignal(service, queueWorker, queueService, emit, epicReadyPollIntervalMs);
       } finally {
-        await stopPlaywrightServer(playwrightServer.pid, emit);
+        await removeSupervisorPidFile();
       }
     });
 

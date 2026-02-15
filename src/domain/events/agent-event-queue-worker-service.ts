@@ -138,7 +138,8 @@ async function validateQueueMessage(filePath: string): Promise<AgentEventQueueMe
     message.event.type !== "acceptance-test.update" &&
     message.event.type !== "backlog.update" &&
     message.event.type !== "backlog.epic.ready" &&
-    message.event.type !== "backlog.epic.review.ready"
+    message.event.type !== "backlog.epic.review.ready" &&
+    message.event.type !== "debug.playwright-test"
   ) {
     throw new Error("queue message.event.type must be a known SystemEvent");
   }

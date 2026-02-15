@@ -406,6 +406,9 @@ function buildFollowUpEvent(nextEventType: SystemEvent["type"], sourceEvent: Sys
     }
     return { type: "backlog.epic.review.ready", epicId };
   }
+  if (nextEventType === "debug.playwright-test") {
+    return { type: "debug.playwright-test" };
+  }
   return { type: "backlog.epic.ready" };
 }
 

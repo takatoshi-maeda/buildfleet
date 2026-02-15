@@ -47,6 +47,12 @@ const AGENT_ROLE_DEFINITIONS: Record<AgentRole, AgentRoleDefinition> = {
         triggerEvent: "review",
         emitEvent: null,
       },
+      // Dedicated debug event allows validating Playwright execution capability
+      // without coupling to backlog lifecycle transitions.
+      "debug.playwright-test": {
+        triggerEvent: "debug.playwright-test",
+        emitEvent: null,
+      },
     },
   },
   Gatekeeper: {

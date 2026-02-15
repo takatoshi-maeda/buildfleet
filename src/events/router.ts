@@ -5,7 +5,8 @@ export type SystemEvent =
   | { type: "acceptance-test.update" }
   | { type: "backlog.update" }
   | { type: "backlog.epic.ready"; epicId?: string }
-  | { type: "backlog.epic.review.ready"; epicId: string };
+  | { type: "backlog.epic.review.ready"; epicId: string }
+  | { type: "debug.playwright-test" };
 
 export const SYSTEM_EVENT_TYPES: ReadonlyArray<SystemEvent["type"]> = [
   "docs.update",
@@ -13,6 +14,7 @@ export const SYSTEM_EVENT_TYPES: ReadonlyArray<SystemEvent["type"]> = [
   "backlog.update",
   "backlog.epic.ready",
   "backlog.epic.review.ready",
+  "debug.playwright-test",
 ];
 
 export interface SystemEventCommandOptionDefinition {
@@ -101,6 +103,12 @@ export const SYSTEM_EVENT_COMMAND_DEFINITIONS: Record<SystemEvent["type"], Syste
         throw new Error("backlog.epic.review.ready: --epic-id must be non-empty");
       }
       return { type: "backlog.epic.review.ready", epicId };
+    },
+  },
+  "debug.playwright-test": {
+    description: "SystemEvent.type=debug.playwright-test",
+    createEvent() {
+      return { type: "debug.playwright-test" };
     },
   },
 };

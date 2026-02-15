@@ -47,6 +47,7 @@ describe("trigger command", () => {
     expect(output).toContain("backlog.update");
     expect(output).toContain("backlog.epic.ready");
     expect(output).toContain("backlog.epic.review.ready");
+    expect(output).toContain("debug.playwright-test");
     expect(output).toContain("--paths <path> (repeatable/comma-separated)");
     expect(output).not.toContain("docs.update [options]");
   });
@@ -155,6 +156,18 @@ describe("trigger command", () => {
 
     expect(router.events).toEqual([{ type: "backlog.epic.review.ready", epicId: "E-123" }]);
     expect(queue.events).toEqual([{ type: "backlog.epic.review.ready", epicId: "E-123" }]);
+    expect(logSpy).toHaveBeenCalled();
+  });
+
+  it("builds debug.playwright-test event with no options", async () => {
+    const router = new RecordingRouter();
+    const queue = new RecordingQueue();
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    await createTriggerCommand({ router, queue }).parseAsync(["debug.playwright-test"], { from: "user" });
+
+    expect(router.events).toEqual([{ type: "debug.playwright-test" }]);
+    expect(queue.events).toEqual([{ type: "debug.playwright-test" }]);
     expect(logSpy).toHaveBeenCalled();
   });
 

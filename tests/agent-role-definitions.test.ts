@@ -17,6 +17,7 @@ describe("agent-role-definitions", () => {
     expect(isRoleSubscribedToEvent("Developer", { type: "acceptance-test.update" })).toBe(false);
     expect(isRoleSubscribedToEvent("Developer", { type: "backlog.epic.ready" })).toBe(true);
     expect(isRoleSubscribedToEvent("Reviewer", { type: "backlog.epic.review.ready", epicId: "E-001" })).toBe(true);
+    expect(isRoleSubscribedToEvent("Reviewer", { type: "debug.playwright-test" })).toBe(true);
     expect(isRoleSubscribedToEvent("Orchestrator", { type: "acceptance-test.update" })).toBe(true);
     expect(isRoleSubscribedToEvent("Orchestrator", { type: "backlog.update" })).toBe(false);
     expect(isRoleSubscribedToEvent("Gatekeeper", { type: "docs.update", paths: ["docs/a.md"] })).toBe(true);
@@ -46,5 +47,9 @@ describe("agent-role-definitions", () => {
     const reviewerPrompt = getRoleEventPromptDefinition("Reviewer", "backlog.epic.review.ready");
     expect(reviewerPrompt.promptEventType).toBe("review");
     expect(reviewerPrompt.emitEventType).toBeNull();
+
+    const reviewerDebugPrompt = getRoleEventPromptDefinition("Reviewer", "debug.playwright-test");
+    expect(reviewerDebugPrompt.promptEventType).toBe("debug.playwright-test");
+    expect(reviewerDebugPrompt.emitEventType).toBeNull();
   });
 });
