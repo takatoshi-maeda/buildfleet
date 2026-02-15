@@ -1,11 +1,12 @@
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { FleetService } from "../src/domain/agents/fleet-service.js";
 import type { AgentRole } from "../src/domain/roles-model.js";
 import type { AppServerSession } from "../src/domain/app-server-session-model.js";
 import type { FleetProcessStartResult } from "../src/infra/process/fleet-process-manager.js";
+import type { HookCommandRunner } from "../src/infra/process/hook-command-runner.js";
 
 class FakeProcessManager {
   public stopped: Array<number | null> = [];
@@ -87,6 +88,28 @@ class FakeAppServerClient {
 
   async waitForTurnCompletion(agentId: string, threadId: string, turnId: string): Promise<void> {
     this.completedTurns.push({ agentId, threadId, turnId });
+  }
+}
+
+class FailingTurnAppServerClient extends FakeAppServerClient {
+  override async startTurn(
+    _inputAgentId: string,
+    _input: { threadId: string; input: Array<{ type: "text"; text: string }> },
+  ): Promise<{ turnId: string; lastNotificationAt: string }> {
+    throw new Error("injected startTurn failure");
+  }
+}
+
+class FakeHookCommandRunner implements HookCommandRunner {
+  public executed: Array<{ command: string; phase: string | undefined; role: string | undefined }> = [];
+
+  async run(command: string, options: { cwd: string; env: NodeJS.ProcessEnv }): Promise<void> {
+    void options.cwd;
+    this.executed.push({
+      command,
+      phase: options.env.CODEFLEET_HOOK_PHASE,
+      role: options.env.CODEFLEET_HOOK_ROLE,
+    });
   }
 }
 
@@ -282,5 +305,143 @@ describe("FleetService", () => {
     });
 
     expect(emittedEvent).toEqual({ type: "backlog.update" });
+  });
+
+  it("runs before_start and after_complete hooks for the role", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codefleet-fleet-"));
+    const rolesPath = path.join(tempDir, ".codefleet/roles.json");
+    const runtimeDir = path.join(tempDir, ".codefleet/runtime");
+    const logDir = path.join(tempDir, ".codefleet/logs/agents");
+    const hooksPath = path.join(tempDir, ".codefleet/hooks.json");
+    await fs.mkdir(path.dirname(hooksPath), { recursive: true });
+    await fs.writeFile(
+      hooksPath,
+      JSON.stringify(
+        {
+          Developer: {
+            before_start: "echo before",
+            after_complete: "echo complete",
+          },
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+
+    const hookRunner = new FakeHookCommandRunner();
+    const service = new FleetService(
+      rolesPath,
+      runtimeDir,
+      logDir,
+      new FakeProcessManager() as never,
+      new FakeAppServerClient() as never,
+      hooksPath,
+      hookRunner,
+    );
+    await service.up();
+
+    await service.dispatchAgentEvent({
+      agentId: "developer-1",
+      agentRole: "Developer",
+      event: { type: "backlog.epic.ready", epicId: "E-321" },
+    });
+
+    expect(hookRunner.executed).toEqual([
+      { command: "echo before", phase: "before_start", role: "Developer" },
+      { command: "echo complete", phase: "after_complete", role: "Developer" },
+    ]);
+  });
+
+  it("runs after_fail hook when role dispatch fails", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codefleet-fleet-"));
+    const rolesPath = path.join(tempDir, ".codefleet/roles.json");
+    const runtimeDir = path.join(tempDir, ".codefleet/runtime");
+    const logDir = path.join(tempDir, ".codefleet/logs/agents");
+    const hooksPath = path.join(tempDir, ".codefleet/hooks.json");
+    await fs.mkdir(path.dirname(hooksPath), { recursive: true });
+    await fs.writeFile(
+      hooksPath,
+      JSON.stringify(
+        {
+          Developer: {
+            before_start: "echo before",
+            after_fail: "echo failed",
+          },
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+
+    const hookRunner = new FakeHookCommandRunner();
+    const service = new FleetService(
+      rolesPath,
+      runtimeDir,
+      logDir,
+      new FakeProcessManager() as never,
+      new FailingTurnAppServerClient() as never,
+      hooksPath,
+      hookRunner,
+    );
+    await service.up();
+
+    await expect(
+      service.dispatchAgentEvent({
+        agentId: "developer-1",
+        agentRole: "Developer",
+        event: { type: "backlog.epic.ready", epicId: "E-654" },
+      }),
+    ).rejects.toThrow(/injected startTurn failure/u);
+
+    expect(hookRunner.executed).toEqual([
+      { command: "echo before", phase: "before_start", role: "Developer" },
+      { command: "echo failed", phase: "after_fail", role: "Developer" },
+    ]);
+  });
+
+  it("logs hook command before execution", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codefleet-fleet-"));
+    const rolesPath = path.join(tempDir, ".codefleet/roles.json");
+    const runtimeDir = path.join(tempDir, ".codefleet/runtime");
+    const logDir = path.join(tempDir, ".codefleet/logs/agents");
+    const hooksPath = path.join(tempDir, ".codefleet/hooks.json");
+    await fs.mkdir(path.dirname(hooksPath), { recursive: true });
+    await fs.writeFile(
+      hooksPath,
+      JSON.stringify(
+        {
+          Developer: {
+            before_start: "echo hook-log",
+          },
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const hookRunner = new FakeHookCommandRunner();
+    const service = new FleetService(
+      rolesPath,
+      runtimeDir,
+      logDir,
+      new FakeProcessManager() as never,
+      new FakeAppServerClient() as never,
+      hooksPath,
+      hookRunner,
+    );
+    await service.up();
+
+    await service.dispatchAgentEvent({
+      agentId: "developer-1",
+      agentRole: "Developer",
+      event: { type: "backlog.epic.ready", epicId: "E-777" },
+    });
+
+    expect(logSpy).toHaveBeenCalledWith("[codefleet:hook] role=Developer phase=before_start command=echo hook-log");
+    logSpy.mockRestore();
   });
 });

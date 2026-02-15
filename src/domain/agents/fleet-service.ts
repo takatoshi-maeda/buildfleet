@@ -8,8 +8,10 @@ import { SYSTEM_EVENT_TYPES, type SystemEvent } from "../../events/router.js";
 import type { AgentRuntime, AgentRuntimeCollection } from "../agent-runtime-model.js";
 import type { AppServerSession, AppServerSessionCollection } from "../app-server-session-model.js";
 import type { AgentEventQueueMessage } from "../events/agent-event-queue-message-model.js";
+import type { RoleHookPhase, RoleHooksByAgentRole } from "../hooks-model.js";
 import type { AgentRole } from "../roles-model.js";
 import { SCHEMA_PATHS } from "../schema-paths.js";
+import { ShellHookCommandRunner, type HookCommandRunner } from "../../infra/process/hook-command-runner.js";
 import { getRoleEventPromptDefinition } from "./agent-role-definitions.js";
 import { renderEventPromptTemplate } from "./event-prompt-template.js";
 import { getRoleEventPromptTemplate, getRoleStartupPrompt } from "./role-prompts.js";
@@ -17,6 +19,7 @@ import { getRoleEventPromptTemplate, getRoleStartupPrompt } from "./role-prompts
 const DEFAULT_ROLES_PATH = ".codefleet/roles.json";
 const DEFAULT_RUNTIME_DIR = ".codefleet/runtime";
 const DEFAULT_LOG_DIR = ".codefleet/logs/agents";
+const DEFAULT_HOOKS_PATH = ".codefleet/hooks.json";
 const DEFAULT_GATEKEEPER_COUNT = 1;
 const DEFAULT_DEVELOPER_COUNT = 1;
 const DEFAULT_REVIEWER_COUNT = 1;
@@ -51,6 +54,8 @@ export class FleetService {
     private readonly logDir: string = DEFAULT_LOG_DIR,
     private readonly processManager: FleetProcessManager = new FleetProcessManager(),
     private readonly appServerClient: AppServerClient = new AppServerClient(),
+    private readonly hooksPath: string = DEFAULT_HOOKS_PATH,
+    private readonly hookCommandRunner: HookCommandRunner = new ShellHookCommandRunner(),
   ) {
     // Retained for compatibility with existing constructor call sites.
     void this.rolesPath;
@@ -247,51 +252,65 @@ export class FleetService {
   }
 
   async dispatchAgentEvent(input: DispatchAgentEventInput): Promise<SystemEvent | null> {
-    const sessions = await this.getOrInitializeSessions();
-    const session = upsertSession(sessions, {
+    const hookContext = {
       agentId: input.agentId,
-      status: "ready",
-      initialized: true,
-      threadId: null,
-      activeTurnId: null,
-      lastNotificationAt: new Date().toISOString(),
-    });
+      role: input.agentRole,
+      eventType: input.event.type,
+    };
+    try {
+      await this.executeRoleHooks(input.agentRole, "before_start", hookContext);
 
-    const started = await this.appServerClient.startThread(input.agentId, {
-      baseInstructions: buildThreadLanguageInstruction(this.threadResponseLanguage),
-    });
-    const threadId = started.threadId;
-    const prompt = await this.buildEventPrompt(input.agentRole, input.event);
-    const turn = await this.appServerClient.startTurn(input.agentId, {
-      threadId,
-      input: [{ type: "text", text: prompt }],
-    });
-    if (turn.turnId) {
-      await this.appServerClient.waitForTurnCompletion(input.agentId, threadId, turn.turnId);
-    }
+      const sessions = await this.getOrInitializeSessions();
+      const session = upsertSession(sessions, {
+        agentId: input.agentId,
+        status: "ready",
+        initialized: true,
+        threadId: null,
+        activeTurnId: null,
+        lastNotificationAt: new Date().toISOString(),
+      });
 
-    session.status = "ready";
-    session.initialized = true;
-    session.threadId = threadId;
-    session.activeTurnId = turn.turnId;
-    session.lastNotificationAt = turn.lastNotificationAt;
-    session.lastError = undefined;
-    sessions.updatedAt = new Date().toISOString();
-    await this.sessionRepository.save(sessions);
+      const started = await this.appServerClient.startThread(input.agentId, {
+        baseInstructions: buildThreadLanguageInstruction(this.threadResponseLanguage),
+      });
+      const threadId = started.threadId;
+      const prompt = await this.buildEventPrompt(input.agentRole, input.event);
+      const turn = await this.appServerClient.startTurn(input.agentId, {
+        threadId,
+        input: [{ type: "text", text: prompt }],
+      });
+      if (turn.turnId) {
+        await this.appServerClient.waitForTurnCompletion(input.agentId, threadId, turn.turnId);
+      }
 
-    const eventPromptDefinition = getRoleEventPromptDefinition(input.agentRole, input.event.type);
-    const emittedEventType = eventPromptDefinition.emitEventType;
-    if (!emittedEventType) {
-      return null;
+      session.status = "ready";
+      session.initialized = true;
+      session.threadId = threadId;
+      session.activeTurnId = turn.turnId;
+      session.lastNotificationAt = turn.lastNotificationAt;
+      session.lastError = undefined;
+      sessions.updatedAt = new Date().toISOString();
+      await this.sessionRepository.save(sessions);
+
+      await this.executeRoleHooks(input.agentRole, "after_complete", hookContext);
+
+      const eventPromptDefinition = getRoleEventPromptDefinition(input.agentRole, input.event.type);
+      const emittedEventType = eventPromptDefinition.emitEventType;
+      if (!emittedEventType) {
+        return null;
+      }
+      // Re-emitting the same event type by default can create infinite self-trigger loops.
+      if (emittedEventType === input.event.type) {
+        return null;
+      }
+      if (!isSystemEventType(emittedEventType)) {
+        return null;
+      }
+      return buildFollowUpEvent(emittedEventType, input.event);
+    } catch (error) {
+      await this.executeAfterFailHooks(input.agentRole, hookContext, error);
+      throw error;
     }
-    // Re-emitting the same event type by default can create infinite self-trigger loops.
-    if (emittedEventType === input.event.type) {
-      return null;
-    }
-    if (!isSystemEventType(emittedEventType)) {
-      return null;
-    }
-    return buildFollowUpEvent(emittedEventType, input.event);
   }
 
   private async getOrInitializeRuntime(): Promise<AgentRuntimeCollection> {
@@ -357,6 +376,64 @@ export class FleetService {
     }
     return `${instructions.trim()}\n\n${renderedEventPrompt}`;
   }
+
+  private async executeAfterFailHooks(
+    role: AgentRole,
+    context: { agentId: string; role: AgentRole; eventType: SystemEvent["type"] },
+    cause: unknown,
+  ): Promise<void> {
+    try {
+      await this.executeRoleHooks(role, "after_fail", context);
+    } catch (hookError) {
+      const message = [
+        `dispatch failed for role=${role} event=${context.eventType}`,
+        `original error: ${toErrorMessage(cause)}`,
+        `after_fail hook error: ${toErrorMessage(hookError)}`,
+      ].join("; ");
+      throw new CodefleetError("ERR_UNEXPECTED", message, hookError);
+    }
+  }
+
+  private async executeRoleHooks(
+    role: AgentRole,
+    phase: RoleHookPhase,
+    context: { agentId: string; role: AgentRole; eventType: SystemEvent["type"] },
+  ): Promise<void> {
+    const hooksByRole = await this.readHooksByRole();
+    const roleHooks = hooksByRole[role];
+    if (!roleHooks) {
+      return;
+    }
+    const commands = normalizeHookCommands(roleHooks[phase]);
+    for (const command of commands) {
+      console.log(`[codefleet:hook] role=${role} phase=${phase} command=${command}`);
+      // Expose hook context via env vars so scripts can stay generic across roles and phases.
+      await this.hookCommandRunner.run(command, {
+        cwd: process.cwd(),
+        env: {
+          ...process.env,
+          CODEFLEET_HOOK_AGENT_ID: context.agentId,
+          CODEFLEET_HOOK_ROLE: context.role,
+          CODEFLEET_HOOK_EVENT_TYPE: context.eventType,
+          CODEFLEET_HOOK_PHASE: phase,
+        },
+      });
+    }
+  }
+
+  private async readHooksByRole(): Promise<RoleHooksByAgentRole> {
+    const raw = await safeRead(this.hooksPath);
+    if (raw.trim().length === 0) {
+      return {};
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (error) {
+      throw new CodefleetError("ERR_VALIDATION", `file is not valid JSON: ${this.hooksPath}`, error);
+    }
+    return parseRoleHooksByAgentRole(parsed);
+  }
 }
 
 function buildThreadLanguageInstruction(lang: string | undefined): string | undefined {
@@ -365,6 +442,62 @@ function buildThreadLanguageInstruction(lang: string | undefined): string | unde
   }
   // This instruction is injected at thread start so all replies in the thread consistently follow the requested language.
   return `All responses must be in ${lang}.`;
+}
+
+function parseRoleHooksByAgentRole(value: unknown): RoleHooksByAgentRole {
+  if (!isRecord(value)) {
+    throw new CodefleetError("ERR_VALIDATION", "hooks.json must be a JSON object");
+  }
+  const candidate = isRecord(value.roles) ? value.roles : value;
+  const parsed: RoleHooksByAgentRole = {};
+
+  for (const role of ["Orchestrator", "Developer", "Gatekeeper", "Reviewer"] as const) {
+    const roleValue = candidate[role];
+    if (roleValue === undefined) {
+      continue;
+    }
+    if (!isRecord(roleValue)) {
+      throw new CodefleetError("ERR_VALIDATION", `hooks.${role} must be an object`);
+    }
+    parsed[role] = {
+      before_start: parseHookCommandValue(role, "before_start", roleValue.before_start),
+      after_complete: parseHookCommandValue(role, "after_complete", roleValue.after_complete),
+      after_fail: parseHookCommandValue(role, "after_fail", roleValue.after_fail),
+    };
+  }
+  return parsed;
+}
+
+function parseHookCommandValue(
+  role: AgentRole,
+  phase: RoleHookPhase,
+  value: unknown,
+): string | string[] | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value === "string") {
+    return value;
+  }
+  if (!Array.isArray(value) || !value.every((entry) => typeof entry === "string")) {
+    throw new CodefleetError("ERR_VALIDATION", `hooks.${role}.${phase} must be a string or string[]`);
+  }
+  return value;
+}
+
+function normalizeHookCommands(value: string | string[] | undefined): string[] {
+  if (value === undefined) {
+    return [];
+  }
+  return (Array.isArray(value) ? value : [value]).map((command) => command.trim()).filter((command) => command.length > 0);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function toErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function normalizeLanguage(lang: string | undefined): string | undefined {
