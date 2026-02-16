@@ -62,6 +62,10 @@ const AGENT_ROLE_DEFINITIONS: Record<AgentRole, AgentRoleDefinition> = {
         triggerEvent: "acceptance-test.update",
         emitEvent: "acceptance-test.update",
       },
+      "acceptance-test.required": {
+        triggerEvent: "acceptance-test.run",
+        emitEvent: null,
+      },
     },
   },
 };

@@ -239,6 +239,45 @@ describe("AgentEventQueueService", () => {
     expect(result.files).toHaveLength(2);
   });
 
+  it("enqueues acceptance-test.required only for a single running gatekeeper", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codefleet-event-queue-"));
+    const runtimeDir = path.join(tempDir, ".codefleet", "runtime");
+    await fs.mkdir(runtimeDir, { recursive: true });
+
+    const runtimes: AgentRuntimeCollection = {
+      version: 1,
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      agents: [
+        {
+          id: "gatekeeper-1",
+          role: "Gatekeeper",
+          status: "running",
+          pid: 111,
+          cwd: tempDir,
+          startedAt: "2026-01-01T00:00:00.000Z",
+          lastHeartbeatAt: "2026-01-01T00:00:00.000Z",
+        },
+        {
+          id: "gatekeeper-2",
+          role: "Gatekeeper",
+          status: "running",
+          pid: 222,
+          cwd: tempDir,
+          startedAt: "2026-01-01T00:00:00.000Z",
+          lastHeartbeatAt: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+    };
+
+    await fs.writeFile(path.join(runtimeDir, "agents.json"), `${JSON.stringify(runtimes, null, 2)}\n`, "utf8");
+
+    const service = new AgentEventQueueService(runtimeDir);
+    const result = await service.enqueueToRunningAgents({ type: "acceptance-test.required" });
+
+    expect(result.enqueuedAgentIds).toEqual(["gatekeeper-1"]);
+    expect(result.files).toHaveLength(1);
+  });
+
   it("drops backlog.epic.ready when same event is already pending/processing", async () => {
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codefleet-event-queue-"));
     const runtimeDir = path.join(tempDir, ".codefleet", "runtime");
@@ -278,6 +317,50 @@ describe("AgentEventQueueService", () => {
 
     const service = new AgentEventQueueService(runtimeDir);
     const result = await service.enqueueToRunningAgents({ type: "backlog.epic.ready" });
+
+    expect(result.enqueuedAgentIds).toEqual([]);
+    expect(result.files).toEqual([]);
+  });
+
+  it("drops acceptance-test.required when same event is already pending/processing", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codefleet-event-queue-"));
+    const runtimeDir = path.join(tempDir, ".codefleet", "runtime");
+    await fs.mkdir(runtimeDir, { recursive: true });
+
+    const runtimes: AgentRuntimeCollection = {
+      version: 1,
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      agents: [
+        {
+          id: "gatekeeper-1",
+          role: "Gatekeeper",
+          status: "running",
+          pid: 111,
+          cwd: tempDir,
+          startedAt: "2026-01-01T00:00:00.000Z",
+          lastHeartbeatAt: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+    };
+
+    await fs.writeFile(path.join(runtimeDir, "agents.json"), `${JSON.stringify(runtimes, null, 2)}\n`, "utf8");
+    const processingDir = path.join(runtimeDir, "events", "agents", "gatekeeper-1", "processing");
+    await fs.mkdir(processingDir, { recursive: true });
+    await fs.writeFile(
+      path.join(processingDir, "existing.json"),
+      `${JSON.stringify({
+        id: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        agentId: "gatekeeper-1",
+        agentRole: "Gatekeeper",
+        event: { type: "acceptance-test.required" },
+        source: { command: "codefleet trigger acceptance-test.required" },
+      })}\n`,
+      "utf8",
+    );
+
+    const service = new AgentEventQueueService(runtimeDir);
+    const result = await service.enqueueToRunningAgents({ type: "acceptance-test.required" });
 
     expect(result.enqueuedAgentIds).toEqual([]);
     expect(result.files).toEqual([]);

@@ -136,6 +136,7 @@ async function validateQueueMessage(filePath: string): Promise<AgentEventQueueMe
     }
   } else if (
     message.event.type !== "acceptance-test.update" &&
+    message.event.type !== "acceptance-test.required" &&
     message.event.type !== "backlog.update" &&
     message.event.type !== "backlog.epic.ready" &&
     message.event.type !== "backlog.epic.review.ready" &&

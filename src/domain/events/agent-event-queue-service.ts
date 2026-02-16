@@ -63,13 +63,18 @@ export class AgentEventQueueService {
     event: SystemEvent,
     runningAgents: AgentRuntimeCollection["agents"],
   ): Promise<AgentRuntimeCollection["agents"]> {
-    if (event.type !== "backlog.epic.ready" && event.type !== "backlog.epic.review.ready") {
+    const serializedRoleByEventType: Partial<Record<SystemEvent["type"], "Developer" | "Reviewer" | "Gatekeeper">> = {
+      "backlog.epic.ready": "Developer",
+      "backlog.epic.review.ready": "Reviewer",
+      "acceptance-test.required": "Gatekeeper",
+    };
+    const targetRole = serializedRoleByEventType[event.type];
+    if (!targetRole) {
       return runningAgents;
     }
 
-    const targetRole = event.type === "backlog.epic.ready" ? "Developer" : "Reviewer";
-    // Epic implementation/review work is serialized per role to keep execution
-    // deterministic and avoid duplicate handling for the same transition stage.
+    // Serialized role-scoped events (implementation/review/test execution) are
+    // limited to one running agent to avoid duplicated concurrent handling.
     const target = runningAgents.find((agent) => agent.role === targetRole);
     if (!target) {
       return [];

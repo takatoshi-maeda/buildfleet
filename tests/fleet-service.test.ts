@@ -283,6 +283,32 @@ describe("FleetService", () => {
     expect(appServer.startedTurns[0]?.input[0]?.text).toContain("Playwright remote server endpoint: http://127.0.0.1:9333");
   });
 
+  it("runs gatekeeper acceptance-test.run prompt for acceptance-test.required without follow-up emit", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codefleet-fleet-"));
+    const rolesPath = path.join(tempDir, ".codefleet/roles.json");
+    const runtimeDir = path.join(tempDir, ".codefleet/runtime");
+    const logDir = path.join(tempDir, ".codefleet/logs/agents");
+    const appServer = new FakeAppServerClient();
+    const service = new FleetService(
+      rolesPath,
+      runtimeDir,
+      logDir,
+      new FakeProcessManager() as never,
+      appServer as never,
+    );
+
+    await service.up();
+    const emittedEvent = await service.dispatchAgentEvent({
+      agentId: "gatekeeper-1",
+      agentRole: "Gatekeeper",
+      event: { type: "acceptance-test.required" },
+    });
+
+    expect(emittedEvent).toBeNull();
+    expect(appServer.startedTurns[0]?.input[0]?.text).toContain("Trigger event: acceptance-test.required");
+    expect(appServer.startedTurns[0]?.input[0]?.text).toContain("acceptance-test.run.md");
+  });
+
   it("emits backlog.update after orchestrator handles acceptance-test.update", async () => {
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codefleet-fleet-"));
     const rolesPath = path.join(tempDir, ".codefleet/roles.json");

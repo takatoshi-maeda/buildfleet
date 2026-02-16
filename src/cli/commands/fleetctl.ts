@@ -577,7 +577,7 @@ async function waitForShutdownSignal(
           level: "info",
           event: "fleet.event.enqueued",
           source: "backlog-poller",
-          sourceEventType: "backlog.epic.ready",
+          sourceEventType: event.type,
           enqueuedAgentIds: enqueueResult.enqueuedAgentIds,
         });
       },

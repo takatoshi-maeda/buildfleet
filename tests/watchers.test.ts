@@ -74,6 +74,9 @@ describe("watchers", () => {
         async hasReadyEpic() {
           return true;
         },
+        async isAcceptanceTestRunRequired() {
+          return false;
+        },
       },
     );
     poller.start();
@@ -95,6 +98,9 @@ describe("watchers", () => {
         async hasReadyEpic() {
           return false;
         },
+        async isAcceptanceTestRunRequired() {
+          return false;
+        },
       },
     );
     poller.start();
@@ -103,5 +109,29 @@ describe("watchers", () => {
     poller.stop();
 
     expect(sink.events).toEqual([]);
+  });
+
+  it("emits acceptance-test.required repeatedly when all epics are done and tests are not-run", async () => {
+    const sink = new RecordingSink();
+    const poller = new BacklogPoller(
+      sink,
+      20,
+      {
+        async hasReadyEpic() {
+          return false;
+        },
+        async isAcceptanceTestRunRequired() {
+          return true;
+        },
+      },
+    );
+    poller.start();
+
+    await sleep(70);
+    poller.stop();
+
+    expect(
+      sink.events.filter((event) => event.type === "acceptance-test.required").length,
+    ).toBeGreaterThanOrEqual(2);
   });
 });

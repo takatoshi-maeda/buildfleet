@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 export type SystemEvent =
   | { type: "docs.update"; paths: string[] }
   | { type: "acceptance-test.update" }
+  | { type: "acceptance-test.required" }
   | { type: "backlog.update" }
   | { type: "backlog.epic.ready"; epicId?: string }
   | { type: "backlog.epic.review.ready"; epicId: string }
@@ -11,6 +12,7 @@ export type SystemEvent =
 export const SYSTEM_EVENT_TYPES: ReadonlyArray<SystemEvent["type"]> = [
   "docs.update",
   "acceptance-test.update",
+  "acceptance-test.required",
   "backlog.update",
   "backlog.epic.ready",
   "backlog.epic.review.ready",
@@ -61,6 +63,12 @@ export const SYSTEM_EVENT_COMMAND_DEFINITIONS: Record<SystemEvent["type"], Syste
     description: "SystemEvent.type=acceptance-test.update",
     createEvent() {
       return { type: "acceptance-test.update" };
+    },
+  },
+  "acceptance-test.required": {
+    description: "SystemEvent.type=acceptance-test.required",
+    createEvent() {
+      return { type: "acceptance-test.required" };
     },
   },
   "backlog.update": {

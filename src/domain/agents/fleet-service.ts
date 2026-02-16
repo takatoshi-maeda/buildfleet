@@ -526,6 +526,9 @@ function buildFollowUpEvent(nextEventType: SystemEvent["type"], sourceEvent: Sys
   if (nextEventType === "acceptance-test.update") {
     return { type: "acceptance-test.update" };
   }
+  if (nextEventType === "acceptance-test.required") {
+    return { type: "acceptance-test.required" };
+  }
   if (nextEventType === "backlog.update") {
     return { type: "backlog.update" };
   }
