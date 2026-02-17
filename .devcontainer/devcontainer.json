@@ -15,18 +15,14 @@
     "source=devcontainer-gh-config-${localEnv:USER},target=/home/vibebox/.config/gh.org,type=volume",
     // Other
     "source=${env:HOME}/.zsh_history,target=/home/vibebox/.zsh_history,type=bind",
-    "source=${env:SSH_AUTH_SOCK},target=/tmp/ssh-agent.sock,type=bind",
-    "source=${env:HOME}/.orbstack/run/docker.sock,target=/var/run/docker.sock,type=bind"
+    "source=${env:SSH_AUTH_SOCK},target=/tmp/ssh-agent.sock,type=bind"
   ],
   "workspaceFolder": "/workspace",
   "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=delegated",
   "runArgs": [
     "--cap-add=NET_ADMIN",
     "--cap-add=NET_RAW",
-    "--name=vibebox.codefleet",
-    // OrbStack docker.sock is typically owned by root:root (0660),
-    // so add root group to allow non-root remoteUser to access the Docker API.
-    "--group-add=0"
+    "--name=vibebox.codefleet"
   ],
   "customizations": {
     "vscode": {

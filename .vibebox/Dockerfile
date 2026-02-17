@@ -194,18 +194,3 @@ RUN (type -p wget >/dev/null || (sudo apt update && sudo apt-get install wget -y
     && sudo apt update \
     && sudo apt install gh -y
 USER $USERNAME
-
-# * Setup Docker Engine * -------------------------------------------------------------------------------------------------------------
-USER root
-# Add Docker's official GPG key:
-RUN apt-get update \
-    && apt-get install -y ca-certificates curl \
-    && install -m 0755 -d /etc/apt/keyrings \
-    && curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc \
-    && chmod a+r /etc/apt/keyrings/docker.asc \
-    && . /etc/os-release \
-    && printf "Types: deb\nURIs: https://download.docker.com/linux/ubuntu\nSuites: %s\nComponents: stable\nSigned-By: /etc/apt/keyrings/docker.asc\n" "${UBUNTU_CODENAME:-$VERSION_CODENAME}" > /etc/apt/sources.list.d/docker.sources \
-    && apt-get update \
-    && apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-USER $USERNAME
-
