@@ -24,6 +24,9 @@
     "--cap-add=NET_RAW",
     "--name=vibebox.codefleet"
   ],
+  "otherPortsAttributes": {
+    "onAutoForward": "ignore"
+  },
   "customizations": {
     "vscode": {
       "extensions": [
