@@ -41,6 +41,19 @@ interface FleetUpPreflightDependencies {
   emit: (record: object) => void;
 }
 
+interface FleetStartupAutoRecoveryBacklogService {
+  list(input?: { includeHidden?: boolean }): Promise<{
+    epics: Array<{ id: string; status: string }>;
+    items?: Array<{ id: string; status: string; epicId?: string }>;
+  }>;
+}
+
+interface FleetStartupAutoRecoveryQueueService {
+  enqueueToRunningAgents(event: SystemEvent): Promise<{
+    enqueuedAgentIds: string[];
+  }>;
+}
+
 interface DockerEnvironmentDependencies {
   fileExists: (path: string) => Promise<boolean>;
   readFile: (path: string, encoding: BufferEncoding) => Promise<string>;
@@ -264,6 +277,11 @@ export function createFleetctlCommand(options: FleetctlCommandOptions = {}): Com
         agentCount: status.agents.length,
         readySessionCount: status.sessions.filter((session) => session.status === "ready").length,
       });
+      await runFleetStartupAutoRecovery({
+        backlogService: new BacklogService(),
+        queueService,
+        emit,
+      });
 
       await writeSupervisorPid(process.pid);
       try {
@@ -387,6 +405,54 @@ export async function runFleetUpPreflight(deps: FleetUpPreflightDependencies): P
     level: "warn",
     event: "fleet.preflight.git_reset_hard",
   });
+}
+
+export async function runFleetStartupAutoRecovery(
+  deps: {
+    backlogService: FleetStartupAutoRecoveryBacklogService;
+    queueService: FleetStartupAutoRecoveryQueueService;
+    emit: (record: object) => void;
+  },
+  runtimeDir: string = DEFAULT_RUNTIME_DIR,
+): Promise<void> {
+  const listed = await deps.backlogService.list({ includeHidden: true });
+  const recoverableEpics = listed.epics
+    .filter((epic) => epic.status === "in-progress" || epic.status === "in-review")
+    .slice()
+    .sort((left, right) => left.id.localeCompare(right.id));
+  if (recoverableEpics.length === 0) {
+    return;
+  }
+  const inProgressItemIds = (listed.items ?? [])
+    .filter((item) => item.status === "in-progress")
+    .map((item) => item.id)
+    .sort();
+  if (inProgressItemIds.length > 0) {
+    deps.emit({
+      ts: new Date().toISOString(),
+      level: "warn",
+      event: "fleet.startup.auto_recovery.item_in_progress_detected",
+      inProgressItemCount: inProgressItemIds.length,
+      inProgressItemIds,
+    });
+  }
+
+  // Recover epics left in a mid-flight state after crash/restart by re-enqueueing
+  // the next stage event inferred from current status and queue history.
+  for (const epic of recoverableEpics) {
+    const eventType = await resolveRecoveryEventTypeForEpic(runtimeDir, epic.id, epic.status);
+    const enqueueResult = await deps.queueService.enqueueToRunningAgents({ type: eventType, epicId: epic.id });
+    const enqueued = enqueueResult.enqueuedAgentIds.length > 0;
+    deps.emit({
+      ts: new Date().toISOString(),
+      level: enqueued ? "warn" : "info",
+      event: enqueued ? "fleet.startup.auto_recovery.enqueued" : "fleet.startup.auto_recovery.skipped",
+      epicId: epic.id,
+      epicStatus: epic.status,
+      recoveredEventType: eventType,
+      enqueuedAgentIds: enqueueResult.enqueuedAgentIds,
+    });
+  }
 }
 
 export async function assertDockerContainerEnvironment(
@@ -893,6 +959,137 @@ function parsePositivePollIntervalMs(raw: unknown, optionName: string): number {
     throw new Error(`${optionName} must be a positive number`);
   }
   return Math.max(1, Math.floor(value * 1_000));
+}
+
+async function resolveRecoveryEventTypeForEpic(
+  runtimeDir: string,
+  epicId: string,
+  epicStatus: string,
+): Promise<"backlog.epic.ready" | "backlog.epic.polish.ready" | "backlog.epic.review.ready"> {
+  if (epicStatus === "in-progress") {
+    // Explicit epicId bypasses auto-claim and resumes interrupted implementation.
+    return "backlog.epic.ready";
+  }
+  const latest = await readLatestEpicScopedTerminalEvent(runtimeDir, epicId);
+  if (!latest) {
+    return "backlog.epic.polish.ready";
+  }
+  if (latest.type === "backlog.epic.review.ready") {
+    return "backlog.epic.review.ready";
+  }
+  if (latest.type === "backlog.epic.polish.ready" && latest.queueState === "done") {
+    // Polishing finished previously, so restart from reviewer stage if handoff was lost.
+    return "backlog.epic.review.ready";
+  }
+  return "backlog.epic.polish.ready";
+}
+
+async function readLatestEpicScopedTerminalEvent(
+  runtimeDir: string,
+  epicId: string,
+): Promise<{
+  createdAt: string;
+  queueState: "done" | "failed";
+  type: "backlog.epic.polish.ready" | "backlog.epic.review.ready";
+} | null> {
+  const events = await readEpicScopedTerminalEvents(runtimeDir, epicId);
+  const latest = events
+    .slice()
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
+  return latest ?? null;
+}
+
+async function readEpicScopedTerminalEvents(
+  runtimeDir: string,
+  epicId: string,
+): Promise<Array<{ createdAt: string; queueState: "done" | "failed"; type: "backlog.epic.polish.ready" | "backlog.epic.review.ready" }>> {
+  const queueAgentsDir = path.join(runtimeDir, "events", "agents");
+  let agentEntries: Array<{ name: string; isDirectory: () => boolean }> = [];
+  try {
+    agentEntries = await fs.readdir(queueAgentsDir, { withFileTypes: true });
+  } catch (error) {
+    const err = error as NodeJS.ErrnoException;
+    if (err.code === "ENOENT") {
+      return [];
+    }
+    throw error;
+  }
+
+  const result: Array<{
+    createdAt: string;
+    queueState: "done" | "failed";
+    type: "backlog.epic.polish.ready" | "backlog.epic.review.ready";
+  }> = [];
+  for (const agentEntry of agentEntries) {
+    if (!agentEntry.isDirectory()) {
+      continue;
+    }
+    for (const queueState of ["done", "failed"] as const) {
+      const queueStateDir = path.join(queueAgentsDir, agentEntry.name, queueState);
+      let queueStateFiles: string[] = [];
+      try {
+        queueStateFiles = (await fs.readdir(queueStateDir)).filter((entry) => entry.endsWith(".json"));
+      } catch (error) {
+        const err = error as NodeJS.ErrnoException;
+        if (err.code === "ENOENT") {
+          continue;
+        }
+        throw error;
+      }
+      for (const fileName of queueStateFiles) {
+        const filePath = path.join(queueStateDir, fileName);
+        const parsed = await readEpicTerminalEvent(filePath);
+        if (!parsed || parsed.epicId !== epicId) {
+          continue;
+        }
+        result.push({ createdAt: parsed.createdAt, queueState, type: parsed.type });
+      }
+    }
+  }
+  return result;
+}
+
+async function readEpicTerminalEvent(
+  filePath: string,
+): Promise<{ createdAt: string; epicId: string; type: "backlog.epic.polish.ready" | "backlog.epic.review.ready" } | null> {
+  let raw = "";
+  try {
+    raw = await fs.readFile(filePath, "utf8");
+  } catch (error) {
+    const err = error as NodeJS.ErrnoException;
+    if (err.code === "ENOENT") {
+      return null;
+    }
+    throw error;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object") {
+    return null;
+  }
+  const createdAt = (parsed as { createdAt?: unknown }).createdAt;
+  const event = (parsed as { event?: unknown }).event;
+  if (typeof createdAt !== "string" || !event || typeof event !== "object") {
+    return null;
+  }
+  const type = (event as { type?: unknown }).type;
+  const eventEpicId = (event as { epicId?: unknown }).epicId;
+  if (
+    (type !== "backlog.epic.polish.ready" && type !== "backlog.epic.review.ready") ||
+    typeof eventEpicId !== "string" ||
+    eventEpicId.length === 0
+  ) {
+    return null;
+  }
+  return {
+    createdAt,
+    epicId: eventEpicId,
+    type,
+  };
 }
 
 function parsePlaywrightHost(raw: unknown): string {
