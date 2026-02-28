@@ -1,0 +1,3 @@
+[submodule "vendor/ai-kit"]
+	path = vendor/ai-kit
+	url = git@github.com:takatoshi-maeda/ai-kit.git
