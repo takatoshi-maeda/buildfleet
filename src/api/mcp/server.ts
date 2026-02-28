@@ -4,10 +4,12 @@ import { mountMcpRoutes, type AgentMount } from "../../../vendor/ai-kit/src/hono
 import { BacklogService } from "../../domain/backlog/backlog-service.js";
 import { createCodefleetFrontDeskAgent } from "./agents/codefleet-front-desk.js";
 import { registerBacklogMcpTools } from "./tools/backlog-tools.js";
+import { JsonlMcpToolAuditLogger } from "./tools/mcp-tool-audit-log.js";
 
 const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = 3290;
 const DEFAULT_DATA_DIR = ".codefleet/runtime/mcp";
+const DEFAULT_TOOL_AUDIT_LOG_PATH = ".codefleet/runtime/mcp/tool-executions.jsonl";
 const FRONT_DESK_AGENT_NAME = "codefleet.front-desk";
 
 export interface McpServerBuildResult {
@@ -26,12 +28,14 @@ export interface McpApiServerOptions {
   host?: string;
   port?: number;
   dataDir?: string;
+  toolAuditLogPath?: string;
   backlogService?: BacklogService;
 }
 
 export async function buildMcpServer(options: McpApiServerOptions = {}): Promise<McpServerBuildResult> {
   const app = new Hono();
   const backlogService = options.backlogService ?? new BacklogService();
+  const toolAuditLogger = new JsonlMcpToolAuditLogger(options.toolAuditLogPath ?? DEFAULT_TOOL_AUDIT_LOG_PATH);
   const mounts = await mountMcpRoutes(app, {
     basePath: "/api/mcp",
     dataDir: options.dataDir ?? DEFAULT_DATA_DIR,
@@ -47,7 +51,10 @@ export async function buildMcpServer(options: McpApiServerOptions = {}): Promise
   if (frontDeskMount) {
     // Register custom domain tools on the mounted MCP server so they are available
     // through both JSON-RPC calls and /tools/call HTTP bridge routes.
-    registerBacklogMcpTools(frontDeskMount, backlogService);
+    registerBacklogMcpTools(frontDeskMount, backlogService, {
+      agentName: FRONT_DESK_AGENT_NAME,
+      logger: toolAuditLogger,
+    });
   }
 
   return { app, mounts };
@@ -59,12 +66,14 @@ export class McpApiServer {
   private readonly host: string;
   private readonly port: number;
   private readonly dataDir: string;
+  private readonly toolAuditLogPath: string;
   private readonly backlogService?: BacklogService;
 
   constructor(options: McpApiServerOptions = {}) {
     this.host = options.host ?? DEFAULT_HOST;
     this.port = options.port ?? DEFAULT_PORT;
     this.dataDir = options.dataDir ?? DEFAULT_DATA_DIR;
+    this.toolAuditLogPath = options.toolAuditLogPath ?? DEFAULT_TOOL_AUDIT_LOG_PATH;
     this.backlogService = options.backlogService;
   }
 
@@ -75,20 +84,27 @@ export class McpApiServer {
 
     const { app } = await buildMcpServer({
       dataDir: this.dataDir,
+      toolAuditLogPath: this.toolAuditLogPath,
       backlogService: this.backlogService,
     });
-    await new Promise<void>((resolve, reject) => {
-      const created = serve(
-        {
-          fetch: app.fetch,
-          hostname: this.host,
-          port: this.port,
-        },
-        () => resolve(),
-      );
-      created.once("error", reject);
-      this.server = created;
-    });
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const created = serve(
+          {
+            fetch: app.fetch,
+            hostname: this.host,
+            port: this.port,
+          },
+          () => resolve(),
+        );
+        created.once("error", reject);
+        this.server = created;
+      });
+    } catch (error) {
+      this.server = null;
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`failed to start MCP API server on ${this.host}:${this.port}: ${message}`);
+    }
     this.startedAt = new Date().toISOString();
     return this.status();
   }

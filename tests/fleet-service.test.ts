@@ -151,6 +151,46 @@ class FakeApiServerLifecycle implements FleetApiServerLifecycle {
 }
 
 describe("FleetService", () => {
+  it("raises a diagnostic error when API server startup fails", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codefleet-fleet-"));
+    const rolesPath = path.join(tempDir, ".codefleet/roles.json");
+    const runtimeDir = path.join(tempDir, ".codefleet/runtime");
+    const logDir = path.join(tempDir, ".codefleet/logs/agents");
+
+    const failingLifecycle: FleetApiServerLifecycle = {
+      async start() {
+        throw new Error("EADDRINUSE 127.0.0.1:3290");
+      },
+      async stop() {
+        // no-op
+      },
+      status() {
+        return {
+          state: "error",
+          host: "127.0.0.1",
+          port: 3290,
+          startedAt: null,
+          lastError: "EADDRINUSE 127.0.0.1:3290",
+        };
+      },
+    };
+
+    const service = new FleetService(
+      rolesPath,
+      runtimeDir,
+      logDir,
+      new FakeProcessManager() as never,
+      new FakeAppServerClient() as never,
+      undefined,
+      undefined,
+      failingLifecycle,
+    );
+
+    await expect(service.up()).rejects.toMatchObject<Partial<Error>>({
+      message: "failed to start fleet API server: EADDRINUSE 127.0.0.1:3290",
+    });
+  });
+
   it("starts and stops MCP API server with fleet lifecycle", async () => {
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codefleet-fleet-"));
     const rolesPath = path.join(tempDir, ".codefleet/roles.json");

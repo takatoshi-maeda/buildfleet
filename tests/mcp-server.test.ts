@@ -93,6 +93,59 @@ describe("McpApiServer", () => {
       await server.stop();
     }
   });
+
+  it("writes backlog tool audit logs as JSONL", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codefleet-mcp-audit-"));
+    const backlogDir = path.join(tempDir, ".codefleet/data/backlog");
+    const acceptanceSpecPath = path.join(tempDir, ".codefleet/data/acceptance-testing/spec.json");
+    const rolesPath = path.join(tempDir, ".codefleet/roles.json");
+    const auditLogPath = path.join(tempDir, ".codefleet/runtime/mcp/tool-executions.jsonl");
+
+    await fs.mkdir(path.dirname(acceptanceSpecPath), { recursive: true });
+    await fs.writeFile(
+      acceptanceSpecPath,
+      JSON.stringify({ version: 1, updatedAt: "2026-01-01T00:00:00.000Z", tests: [] }, null, 2),
+      "utf8",
+    );
+    await fs.mkdir(path.dirname(rolesPath), { recursive: true });
+    await fs.writeFile(rolesPath, JSON.stringify({ agents: [] }, null, 2), "utf8");
+
+    const backlogService = new BacklogService(backlogDir, acceptanceSpecPath, rolesPath);
+    await backlogService.addEpic({ title: "audit target", acceptanceTestIds: [] });
+
+    const port = 41000 + Math.floor(Math.random() * 1000);
+    const server = new McpApiServer({
+      host: "127.0.0.1",
+      port,
+      dataDir: path.join(tempDir, ".codefleet/runtime/mcp"),
+      toolAuditLogPath: auditLogPath,
+      backlogService,
+    });
+
+    try {
+      await server.start();
+      const listResult = await callTool(port, "backlog.epic.list", {});
+      expect(listResult.result?.isError).toBe(false);
+    } finally {
+      await server.stop();
+    }
+
+    const raw = await fs.readFile(auditLogPath, "utf8");
+    const lines = raw.trim().split("\n").filter((line) => line.length > 0);
+    expect(lines.length).toBeGreaterThan(0);
+    const parsed = JSON.parse(lines[0] ?? "{}") as {
+      agent?: string;
+      tool?: string;
+      durationMs?: number;
+      isError?: boolean;
+      resultCount?: number;
+    };
+    expect(parsed.agent).toBe("codefleet.front-desk");
+    expect(parsed.tool).toBe("backlog.epic.list");
+    expect(parsed.isError).toBe(false);
+    expect(typeof parsed.durationMs).toBe("number");
+    expect(parsed.resultCount).toBe(1);
+  });
 });
 
 async function callTool(port: number, tool: string, args: Record<string, unknown>) {

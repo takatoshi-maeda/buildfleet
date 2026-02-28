@@ -99,7 +99,12 @@ export class FleetService {
     this.threadResponseLanguage = normalizeLanguage(input.lang);
     this.reviewerPlaywrightServerUrl = normalizePlaywrightServerUrl(input.playwrightServerUrl);
     if (this.apiServerLifecycle) {
-      await this.apiServerLifecycle.start();
+      try {
+        await this.apiServerLifecycle.start();
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new CodefleetError("ERR_UNEXPECTED", `failed to start fleet API server: ${message}`, error);
+      }
     }
 
     const targets = buildTargetAgents({
