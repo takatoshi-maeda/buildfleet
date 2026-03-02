@@ -41,7 +41,6 @@ describe("registerFleetObservabilityTools", () => {
       listActivity: vi.fn(),
       watchActivity: vi.fn(),
       listExecutions: vi.fn(),
-      watchExecutions: vi.fn(),
       tailLogs: vi.fn(),
     };
     const { mount, tools } = createTestMount();
@@ -62,7 +61,6 @@ describe("registerFleetObservabilityTools", () => {
       listActivity: vi.fn(),
       watchActivity: vi.fn(),
       listExecutions: vi.fn(),
-      watchExecutions: vi.fn(),
       tailLogs: vi.fn(),
     };
     const { mount, tools } = createTestMount();
@@ -83,7 +81,6 @@ describe("registerFleetObservabilityTools", () => {
       listActivity: vi.fn(),
       watchActivity: vi.fn(),
       listExecutions: vi.fn(),
-      watchExecutions: vi.fn(),
       tailLogs: vi.fn(async () => ({
         role: null,
         agents: [{ agentId: "developer-1", role: "Developer", lines: [], lineCount: 0, truncated: false }],
@@ -119,7 +116,6 @@ describe("registerFleetObservabilityTools", () => {
         };
       }),
       listExecutions: vi.fn(),
-      watchExecutions: vi.fn(),
       tailLogs: vi.fn(),
     };
     const { mount, tools } = createTestMount();
@@ -146,7 +142,6 @@ describe("registerFleetObservabilityTools", () => {
       listActivity: vi.fn(),
       watchActivity: vi.fn(),
       listExecutions: vi.fn(),
-      watchExecutions: vi.fn(),
       tailLogs: vi.fn(async () => ({
         role: "Developer",
         agents: [
@@ -176,5 +171,18 @@ describe("registerFleetObservabilityTools", () => {
       "fleet.logs.complete",
     ]);
     expect(notifications[0]?.params.notificationToken).toBe("tok-2");
+  });
+
+  it("does not register fleet.executions.watch", async () => {
+    const service = {
+      listActivity: vi.fn(),
+      watchActivity: vi.fn(),
+      listExecutions: vi.fn(),
+      tailLogs: vi.fn(),
+    };
+    const { mount, tools } = createTestMount();
+    registerFleetObservabilityTools(mount as never, service as never);
+
+    expect(tools.some((tool) => tool.name === "fleet.executions.watch")).toBe(false);
   });
 });

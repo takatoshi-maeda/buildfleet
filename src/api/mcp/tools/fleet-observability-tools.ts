@@ -2,7 +2,6 @@ import { z } from "zod";
 import type { AgentMount } from "../../../../vendor/ai-kit/src/hono/index.js";
 import type {
   FleetActivityWatchEvent,
-  FleetExecutionsWatchEvent,
   FleetLogsTailResult,
   FleetObservabilityService,
 } from "../../../domain/agents/fleet-observability-service.js";
@@ -29,15 +28,6 @@ const FleetExecutionsListInputSchema = z.object({
   to: z.string().datetime().optional(),
   limit: z.number().int().min(1).max(200).optional(),
   cursor: z.string().min(1).optional(),
-});
-
-const FleetExecutionsWatchInputSchema = z.object({
-  roles: z.array(AgentRoleSchema).optional(),
-  status: z.enum(["running", "success", "failed"]).optional(),
-  from: z.string().datetime().optional(),
-  heartbeatSec: z.number().int().min(5).max(60).optional(),
-  maxDurationSec: z.number().int().min(1).max(1800).optional(),
-  notificationToken: z.string().min(1).optional(),
 });
 
 const FleetLogsTailInputSchema = z.object({
@@ -130,29 +120,6 @@ export function registerFleetObservabilityTools(
   );
 
   mount.mcpServer.registerTool(
-    "fleet.executions.watch",
-    {
-      description: "Watch fleet execution transitions",
-      inputSchema: FleetExecutionsWatchInputSchema.shape,
-    },
-    async (args, extra) =>
-      executeTool(async () => {
-        const input = FleetExecutionsWatchInputSchema.parse(normalizeToolArgs(args));
-        return service.watchExecutions({
-          roles: input.roles,
-          status: input.status,
-          from: input.from,
-          heartbeatSec: input.heartbeatSec ?? 15,
-          maxDurationSec: input.maxDurationSec ?? 300,
-          notificationToken: input.notificationToken,
-          onEvent: async (event) => {
-            await sendWatchNotification(extra as NotificationSenderExtra, event);
-          },
-        });
-      }),
-  );
-
-  mount.mcpServer.registerTool(
     "fleet.logs.tail",
     {
       description: "Tail role-scoped agent logs",
@@ -177,7 +144,7 @@ export function registerFleetObservabilityTools(
 
 async function sendWatchNotification(
   extra: NotificationSenderExtra,
-  event: FleetActivityWatchEvent | FleetExecutionsWatchEvent,
+  event: FleetActivityWatchEvent,
 ): Promise<void> {
   if (!extra.sendNotification) {
     return;

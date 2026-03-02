@@ -63,28 +63,12 @@ export interface FleetActivityWatchEvent {
   payload: Record<string, unknown>;
 }
 
-export interface FleetExecutionsWatchEvent {
-  type:
-    | "fleet.executions.snapshot"
-    | "fleet.executions.changed"
-    | "fleet.executions.heartbeat"
-    | "fleet.executions.complete";
-  payload: Record<string, unknown>;
-}
-
 export interface FleetActivityWatchInput extends FleetActivityListInput {
   includeAgents?: boolean;
   heartbeatSec: number;
   maxDurationSec: number;
   notificationToken?: string;
   onEvent?: (event: FleetActivityWatchEvent) => Promise<void>;
-}
-
-export interface FleetExecutionsWatchInput extends FleetExecutionListInput {
-  heartbeatSec: number;
-  maxDurationSec: number;
-  notificationToken?: string;
-  onEvent?: (event: FleetExecutionsWatchEvent) => Promise<void>;
 }
 
 export interface FleetLogsTailInput {
@@ -256,77 +240,6 @@ export class FleetObservabilityService {
     return { executions: filtered };
   }
 
-  async watchExecutions(input: FleetExecutionsWatchInput): Promise<FleetWatchResult> {
-    const startedAt = new Date().toISOString();
-    let eventCount = 0;
-    let previous = await this.listExecutions({
-      roles: input.roles,
-      status: input.status,
-      from: input.from,
-      limit: 200,
-    });
-    await emitEvent(input.onEvent, {
-      type: "fleet.executions.snapshot",
-      payload: withToken(
-        {
-          updatedAt: new Date().toISOString(),
-          executions: previous.executions,
-        },
-        input.notificationToken,
-      ),
-    });
-    eventCount += 1;
-
-    const timeoutAt = Date.now() + input.maxDurationSec * 1_000;
-    let lastHeartbeatAt = Date.now();
-    while (Date.now() < timeoutAt) {
-      await sleep(DEFAULT_WATCH_POLL_MS);
-      const next = await this.listExecutions({
-        roles: input.roles,
-        status: input.status,
-        from: input.from,
-        limit: 200,
-      });
-      const changes = detectExecutionChanges(previous.executions, next.executions);
-      for (const change of changes) {
-        await emitEvent(input.onEvent, {
-          type: "fleet.executions.changed",
-          payload: withToken(change, input.notificationToken),
-        });
-        eventCount += 1;
-      }
-      previous = next;
-
-      if (Date.now() - lastHeartbeatAt >= input.heartbeatSec * 1_000) {
-        await emitEvent(input.onEvent, {
-          type: "fleet.executions.heartbeat",
-          payload: withToken({ updatedAt: new Date().toISOString() }, input.notificationToken),
-        });
-        eventCount += 1;
-        lastHeartbeatAt = Date.now();
-      }
-    }
-
-    const endedAt = new Date().toISOString();
-    await emitEvent(input.onEvent, {
-      type: "fleet.executions.complete",
-      payload: withToken(
-        {
-          eventCount,
-          reason: "timeout",
-        },
-        input.notificationToken,
-      ),
-    });
-    eventCount += 1;
-    return {
-      startedAt,
-      endedAt,
-      eventCount,
-      reason: "timeout",
-    };
-  }
-
   async tailLogs(input: FleetLogsTailInput): Promise<FleetLogsTailResult> {
     const runtime = await readRuntime(path.join(this.runtimeDir, "agents.json"));
     const roleAgents = runtime.agents
@@ -421,33 +334,6 @@ function detectActivityChanges(
           after: agent,
         });
       }
-    }
-  }
-  return changes;
-}
-
-function detectExecutionChanges(
-  previous: FleetExecutionRecord[],
-  current: FleetExecutionRecord[],
-): Array<Record<string, unknown>> {
-  const previousById = new Map(previous.map((execution) => [execution.executionId, execution] as const));
-  const changes: Array<Record<string, unknown>> = [];
-  for (const execution of current) {
-    const before = previousById.get(execution.executionId);
-    if (!before) {
-      changes.push({
-        updatedAt: new Date().toISOString(),
-        execution,
-        changeType: execution.status === "running" ? "execution_started" : execution.status === "success" ? "execution_succeeded" : "execution_failed",
-      });
-      continue;
-    }
-    if (before.status !== execution.status) {
-      changes.push({
-        updatedAt: new Date().toISOString(),
-        execution,
-        changeType: execution.status === "success" ? "execution_succeeded" : "execution_failed",
-      });
     }
   }
   return changes;
