@@ -278,6 +278,7 @@ export function createFleetctlCommand(options: FleetctlCommandOptions = {}): Com
       for (const session of status.sessions) {
         emitSessionLog(session, emit);
       }
+      emitApiServerLog(status.apiServer, emit);
 
       emit({
         ts: new Date().toISOString(),
@@ -544,6 +545,34 @@ function emitSessionLog(session: AppServerSession, emit: (record: object) => voi
   });
 }
 
+function emitApiServerLog(
+  apiServer:
+    | {
+        state: "running" | "stopped" | "error";
+        host: string;
+        port: number;
+        startedAt: string | null;
+        lastError?: string;
+      }
+    | undefined,
+  emit: (record: object) => void,
+): void {
+  if (!apiServer) {
+    return;
+  }
+
+  emit({
+    ts: new Date().toISOString(),
+    level: apiServer.state === "error" ? "error" : "info",
+    event: "fleet.api-server.state",
+    state: apiServer.state,
+    host: apiServer.host,
+    port: apiServer.port,
+    startedAt: apiServer.startedAt,
+    ...(apiServer.lastError ? { message: apiServer.lastError } : {}),
+  });
+}
+
 function emitLog(record: object, mode: LogMode): void {
   if (mode === "jsonl") {
     console.log(JSON.stringify(record));
@@ -717,6 +746,7 @@ async function waitForShutdownSignal(
           for (const session of status.sessions) {
             emitSessionLog(session, emit);
           }
+          emitApiServerLog(status.apiServer, emit);
           emit({
             ts: new Date().toISOString(),
             level: "info",
@@ -1451,6 +1481,18 @@ function humanMessageForEvent(event: string, payload: Record<string, unknown>): 
     const agentCount = typeof payload.agentCount === "number" ? payload.agentCount : 0;
     const readySessions = typeof payload.readySessionCount === "number" ? payload.readySessionCount : 0;
     return `fleet started summary=${summary} agents=${agentCount} readySessions=${readySessions}`;
+  }
+
+  if (event === "fleet.api-server.state") {
+    const state = typeof payload.state === "string" ? payload.state : "unknown";
+    const host = typeof payload.host === "string" ? payload.host : "unknown-host";
+    const port = typeof payload.port === "number" ? payload.port : "unknown-port";
+    const startedAt = typeof payload.startedAt === "string" ? payload.startedAt : "not-started";
+    const message = typeof payload.message === "string" ? payload.message : null;
+    if (message) {
+      return `api server state=${state} endpoint=http://${host}:${port} startedAt=${startedAt} error=${message}`;
+    }
+    return `api server state=${state} endpoint=http://${host}:${port} startedAt=${startedAt}`;
   }
 
   if (event === "fleet.playwright.started") {
