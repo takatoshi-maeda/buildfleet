@@ -102,4 +102,54 @@ describe("FleetObservabilityService", () => {
     expect(result.agents[0]?.lines).toEqual(["match-line"]);
     expect(result.agents[0]?.lineCount).toBe(1);
   });
+
+  it("tails logs for a specific agentId", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codefleet-observability-"));
+    const runtimeDir = path.join(tempDir, ".codefleet", "runtime");
+    const logDir = path.join(tempDir, ".codefleet", "logs", "agents");
+
+    await fs.mkdir(runtimeDir, { recursive: true });
+    await fs.mkdir(logDir, { recursive: true });
+    await fs.writeFile(
+      path.join(runtimeDir, "agents.json"),
+      JSON.stringify(
+        {
+          version: 1,
+          updatedAt: "2026-01-01T00:00:00.000Z",
+          agents: [
+            {
+              id: "developer-1",
+              role: "Developer",
+              status: "running",
+              pid: 1001,
+              cwd: process.cwd(),
+              startedAt: "2026-01-01T00:00:00.000Z",
+              lastHeartbeatAt: "2026-01-01T00:00:00.000Z",
+            },
+            {
+              id: "reviewer-1",
+              role: "Reviewer",
+              status: "running",
+              pid: 2001,
+              cwd: process.cwd(),
+              startedAt: "2026-01-01T00:00:00.000Z",
+              lastHeartbeatAt: "2026-01-01T00:00:00.000Z",
+            },
+          ],
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+    await fs.writeFile(path.join(logDir, "developer-1.log"), "dev-1\n", "utf8");
+    await fs.writeFile(path.join(logDir, "reviewer-1.log"), "rev-1\nrev-2\n", "utf8");
+
+    const service = new FleetObservabilityService(runtimeDir, logDir);
+    const result = await service.tailLogs({ agentId: "reviewer-1", tailPerAgent: 10 });
+
+    expect(result.agents).toHaveLength(1);
+    expect(result.agents[0]?.agentId).toBe("reviewer-1");
+    expect(result.agents[0]?.lines).toEqual(["rev-1", "rev-2"]);
+  });
 });

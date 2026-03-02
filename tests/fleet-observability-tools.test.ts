@@ -92,7 +92,32 @@ describe("registerFleetObservabilityTools", () => {
     expect(result.isError).toBe(false);
     expect(service.tailLogs).toHaveBeenCalledWith({
       role: undefined,
+      agentId: undefined,
       tailPerAgent: 10,
+      contains: undefined,
+    });
+  });
+
+  it("passes agentId to logs tail query", async () => {
+    const service = {
+      listActivity: vi.fn(),
+      watchActivity: vi.fn(),
+      tailLogs: vi.fn(async () => ({
+        role: null,
+        agents: [{ agentId: "reviewer-1", role: "Reviewer", lines: ["line-1"], lineCount: 1, truncated: false }],
+      })),
+    };
+    const { mount, tools } = createTestMount();
+    registerFleetObservabilityTools(mount as never, service as never);
+
+    const tail = getToolHandler(tools, "fleet.logs.tail");
+    const result = await tail({ arguments: { agentId: "reviewer-1", tailPerAgent: 20 } });
+
+    expect(result.isError).toBe(false);
+    expect(service.tailLogs).toHaveBeenCalledWith({
+      role: undefined,
+      agentId: "reviewer-1",
+      tailPerAgent: 20,
       contains: undefined,
     });
   });

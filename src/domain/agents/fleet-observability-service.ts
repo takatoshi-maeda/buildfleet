@@ -73,6 +73,7 @@ export interface FleetActivityWatchInput extends FleetActivityListInput {
 
 export interface FleetLogsTailInput {
   role?: AgentRole;
+  agentId?: string;
   tailPerAgent: number;
   contains?: string;
 }
@@ -244,6 +245,7 @@ export class FleetObservabilityService {
     const runtime = await readRuntime(path.join(this.runtimeDir, "agents.json"));
     const roleAgents = runtime.agents
       .filter((agent) => (input.role ? agent.role === input.role : true))
+      .filter((agent) => (input.agentId ? agent.id === input.agentId : true))
       .slice()
       .sort((left, right) => left.id.localeCompare(right.id));
     const contains = input.contains?.trim();

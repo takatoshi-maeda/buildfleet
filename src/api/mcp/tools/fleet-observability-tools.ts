@@ -24,6 +24,7 @@ const FleetActivityWatchInputSchema = z.object({
 const FleetLogsTailInputSchema = z.object({
   role: AgentRoleSchema.optional(),
   agentRole: AgentRoleSchema.optional(),
+  agentId: z.string().min(1).optional(),
   tailPerAgent: z.number().int().min(1).max(1000).optional(),
   contains: z.string().optional(),
   stream: z.boolean().optional(),
@@ -98,6 +99,7 @@ export function registerFleetObservabilityTools(
         const requestedRole = resolveLogsTailRole(input);
         const payload = await service.tailLogs({
           role: requestedRole,
+          agentId: input.agentId,
           tailPerAgent: input.tailPerAgent ?? 100,
           contains: input.contains,
         });
