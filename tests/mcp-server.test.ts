@@ -25,6 +25,11 @@ describe("McpApiServer", () => {
       const statusJson = (await statusResponse.json()) as { state?: string };
       expect(statusResponse.status).toBe(200);
       expect(statusJson.state).toBe("ready");
+
+      const corsResponse = await fetch(`http://127.0.0.1:${port}/api/mcp`, {
+        headers: { origin: "http://localhost:8081" },
+      });
+      expect(corsResponse.headers.get("access-control-allow-origin")).toBe("http://localhost:8081");
     } finally {
       await server.stop();
     }

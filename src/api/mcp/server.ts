@@ -1,5 +1,6 @@
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
+import { cors } from "hono/cors";
 import { mountMcpRoutes, type AgentMount } from "../../../vendor/ai-kit/src/hono/index.js";
 import { BacklogService } from "../../domain/backlog/backlog-service.js";
 import { createCodefleetFrontDeskAgent } from "./agents/codefleet-front-desk.js";
@@ -11,6 +12,7 @@ const DEFAULT_PORT = 3290;
 const DEFAULT_DATA_DIR = ".codefleet/runtime/mcp";
 const DEFAULT_TOOL_AUDIT_LOG_PATH = ".codefleet/runtime/mcp/tool-executions.jsonl";
 const FRONT_DESK_AGENT_NAME = "codefleet.front-desk";
+const MCP_ALLOWED_ORIGINS = new Set(["http://localhost:8081"]);
 
 export interface McpServerBuildResult {
   app: Hono;
@@ -34,6 +36,8 @@ export interface McpApiServerOptions {
 
 export async function buildMcpServer(options: McpApiServerOptions = {}): Promise<McpServerBuildResult> {
   const app = new Hono();
+  app.use("/api/mcp", cors({ origin: resolveMcpCorsOrigin }));
+  app.use("/api/mcp/*", cors({ origin: resolveMcpCorsOrigin }));
   const backlogService = options.backlogService ?? new BacklogService();
   const toolAuditLogger = new JsonlMcpToolAuditLogger(options.toolAuditLogPath ?? DEFAULT_TOOL_AUDIT_LOG_PATH);
   const mounts = await mountMcpRoutes(app, {
@@ -58,6 +62,14 @@ export async function buildMcpServer(options: McpApiServerOptions = {}): Promise
   }
 
   return { app, mounts };
+}
+
+function resolveMcpCorsOrigin(origin: string): string | undefined {
+  const normalized = origin.trim().replace(/\/+$/, "");
+  if (normalized.length === 0) {
+    return undefined;
+  }
+  return MCP_ALLOWED_ORIGINS.has(normalized) ? normalized : undefined;
 }
 
 export class McpApiServer {
