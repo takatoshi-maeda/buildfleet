@@ -41,6 +41,7 @@ describe("registerFleetObservabilityTools", () => {
       listActivity: vi.fn(),
       watchActivity: vi.fn(),
       tailLogs: vi.fn(),
+      watchLogsTail: vi.fn(),
     };
     const { mount, tools } = createTestMount();
     registerFleetObservabilityTools(mount as never, service as never);
@@ -60,6 +61,7 @@ describe("registerFleetObservabilityTools", () => {
       listActivity: vi.fn(),
       watchActivity: vi.fn(),
       tailLogs: vi.fn(),
+      watchLogsTail: vi.fn(),
     };
     const { mount, tools } = createTestMount();
     registerFleetObservabilityTools(mount as never, service as never);
@@ -82,6 +84,7 @@ describe("registerFleetObservabilityTools", () => {
         role: null,
         agents: [{ agentId: "developer-1", role: "Developer", lines: [], lineCount: 0, truncated: false }],
       })),
+      watchLogsTail: vi.fn(),
     };
     const { mount, tools } = createTestMount();
     registerFleetObservabilityTools(mount as never, service as never);
@@ -138,6 +141,7 @@ describe("registerFleetObservabilityTools", () => {
         };
       }),
       tailLogs: vi.fn(),
+      watchLogsTail: vi.fn(),
     };
     const { mount, tools } = createTestMount();
     registerFleetObservabilityTools(mount as never, service as never);
@@ -162,13 +166,27 @@ describe("registerFleetObservabilityTools", () => {
     const service = {
       listActivity: vi.fn(),
       watchActivity: vi.fn(),
-      tailLogs: vi.fn(async () => ({
-        role: "Developer",
-        agents: [
-          { agentId: "developer-1", lines: ["line-a"], lineCount: 1, truncated: false },
-          { agentId: "developer-2", lines: ["line-b"], lineCount: 1, truncated: false },
-        ],
-      })),
+      tailLogs: vi.fn(),
+      watchLogsTail: vi.fn(async (input: { onEvent?: (event: { type: string; payload: Record<string, unknown> }) => Promise<void> }) => {
+        await input.onEvent?.({
+          type: "fleet.logs.chunk",
+          payload: { role: "Developer", agentId: "developer-1", lines: ["line-a"], notificationToken: "tok-2" },
+        });
+        await input.onEvent?.({
+          type: "fleet.logs.chunk",
+          payload: { role: "Developer", agentId: "developer-2", lines: ["line-b"], notificationToken: "tok-2" },
+        });
+        await input.onEvent?.({
+          type: "fleet.logs.complete",
+          payload: { role: "Developer", agentCount: 2, lineCount: 2, notificationToken: "tok-2" },
+        });
+        return {
+          startedAt: "2026-01-01T00:00:00.000Z",
+          endedAt: "2026-01-01T00:00:05.000Z",
+          eventCount: 3,
+          reason: "timeout",
+        };
+      }),
     };
     const { mount, tools } = createTestMount();
     registerFleetObservabilityTools(mount as never, service as never);
@@ -198,6 +216,7 @@ describe("registerFleetObservabilityTools", () => {
       listActivity: vi.fn(),
       watchActivity: vi.fn(),
       tailLogs: vi.fn(),
+      watchLogsTail: vi.fn(),
     };
     const { mount, tools } = createTestMount();
     registerFleetObservabilityTools(mount as never, service as never);
@@ -210,6 +229,7 @@ describe("registerFleetObservabilityTools", () => {
       listActivity: vi.fn(),
       watchActivity: vi.fn(),
       tailLogs: vi.fn(),
+      watchLogsTail: vi.fn(),
     };
     const { mount, tools } = createTestMount();
     registerFleetObservabilityTools(mount as never, service as never);

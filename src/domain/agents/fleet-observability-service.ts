@@ -83,6 +83,18 @@ export interface FleetLogsTailResult {
   agents: Array<{ agentId: string; role: AgentRole; lines: string[]; lineCount: number; truncated: boolean }>;
 }
 
+export interface FleetLogsWatchEvent {
+  type: "fleet.logs.chunk" | "fleet.logs.heartbeat" | "fleet.logs.complete";
+  payload: Record<string, unknown>;
+}
+
+export interface FleetLogsTailWatchInput extends FleetLogsTailInput {
+  heartbeatSec: number;
+  maxDurationSec: number;
+  notificationToken?: string;
+  onEvent?: (event: FleetLogsWatchEvent) => Promise<void>;
+}
+
 export class FleetObservabilityService {
   private readonly executionLog: FleetExecutionLog;
 
@@ -243,11 +255,7 @@ export class FleetObservabilityService {
 
   async tailLogs(input: FleetLogsTailInput): Promise<FleetLogsTailResult> {
     const runtime = await readRuntime(path.join(this.runtimeDir, "agents.json"));
-    const roleAgents = runtime.agents
-      .filter((agent) => (input.role ? agent.role === input.role : true))
-      .filter((agent) => (input.agentId ? agent.id === input.agentId : true))
-      .slice()
-      .sort((left, right) => left.id.localeCompare(right.id));
+    const roleAgents = resolveTailTargetAgents(runtime, input);
     const contains = input.contains?.trim();
 
     const agents = await Promise.all(
@@ -274,6 +282,98 @@ export class FleetObservabilityService {
     return { role: input.role ?? null, agents };
   }
 
+  async watchLogsTail(input: FleetLogsTailWatchInput): Promise<FleetWatchResult> {
+    const startedAt = new Date().toISOString();
+    const runtime = await readRuntime(path.join(this.runtimeDir, "agents.json"));
+    const targets = resolveTailTargetAgents(runtime, input);
+    const contains = input.contains?.trim();
+    const offsets = new Map<string, number>();
+    let eventCount = 0;
+    let totalLineCount = 0;
+
+    for (const target of targets) {
+      const sourceLines = await this.readAgentLogLines(target.id);
+      offsets.set(target.id, sourceLines.length);
+      const filtered = contains ? sourceLines.filter((line) => line.includes(contains)) : sourceLines;
+      const lines = filtered.slice(Math.max(filtered.length - input.tailPerAgent, 0));
+      if (lines.length > 0) {
+        await emitEvent(input.onEvent, {
+          type: "fleet.logs.chunk",
+          payload: withToken(
+            {
+              role: input.role ?? null,
+              agentId: target.id,
+              lines,
+            },
+            input.notificationToken,
+          ),
+        });
+        eventCount += 1;
+        totalLineCount += lines.length;
+      }
+    }
+
+    const timeoutAt = Date.now() + input.maxDurationSec * 1_000;
+    let lastHeartbeatAt = Date.now();
+    while (Date.now() < timeoutAt) {
+      await sleep(DEFAULT_WATCH_POLL_MS);
+      for (const target of targets) {
+        const sourceLines = await this.readAgentLogLines(target.id);
+        const previousOffset = offsets.get(target.id) ?? 0;
+        const nextOffset = sourceLines.length < previousOffset ? 0 : previousOffset;
+        const appended = sourceLines.slice(nextOffset);
+        offsets.set(target.id, sourceLines.length);
+        const filtered = contains ? appended.filter((line) => line.includes(contains)) : appended;
+        if (filtered.length === 0) {
+          continue;
+        }
+        await emitEvent(input.onEvent, {
+          type: "fleet.logs.chunk",
+          payload: withToken(
+            {
+              role: input.role ?? null,
+              agentId: target.id,
+              lines: filtered,
+            },
+            input.notificationToken,
+          ),
+        });
+        eventCount += 1;
+        totalLineCount += filtered.length;
+      }
+
+      if (Date.now() - lastHeartbeatAt >= input.heartbeatSec * 1_000) {
+        await emitEvent(input.onEvent, {
+          type: "fleet.logs.heartbeat",
+          payload: withToken({ updatedAt: new Date().toISOString() }, input.notificationToken),
+        });
+        eventCount += 1;
+        lastHeartbeatAt = Date.now();
+      }
+    }
+
+    const endedAt = new Date().toISOString();
+    await emitEvent(input.onEvent, {
+      type: "fleet.logs.complete",
+      payload: withToken(
+        {
+          role: input.role ?? null,
+          agentCount: targets.length,
+          lineCount: totalLineCount,
+        },
+        input.notificationToken,
+      ),
+    });
+    eventCount += 1;
+
+    return {
+      startedAt,
+      endedAt,
+      eventCount,
+      reason: "timeout",
+    };
+  }
+
   private async countInFlightQueue(agentId: string): Promise<{ pending: number; processing: number }> {
     const base = path.join(this.runtimeDir, "events", "agents", agentId);
     const [pending, processing] = await Promise.all([
@@ -281,6 +381,15 @@ export class FleetObservabilityService {
       countJsonFiles(path.join(base, "processing")),
     ]);
     return { pending, processing };
+  }
+
+  private async readAgentLogLines(agentId: string): Promise<string[]> {
+    const filePath = path.join(this.logDir, `${agentId}.log`);
+    const content = await safeRead(filePath);
+    return content
+      .split(/\r?\n/)
+      .map((line) => line.trimEnd())
+      .filter((line) => line.length > 0);
   }
 }
 
@@ -410,6 +519,17 @@ function resolveRoles(roles: AgentRole[] | undefined): AgentRole[] {
     return defaults;
   }
   return [...new Set(roles)];
+}
+
+function resolveTailTargetAgents(
+  runtime: AgentRuntimeCollection,
+  input: { role?: AgentRole; agentId?: string },
+): AgentRuntimeCollection["agents"] {
+  return runtime.agents
+    .filter((agent) => (input.role ? agent.role === input.role : true))
+    .filter((agent) => (input.agentId ? agent.id === input.agentId : true))
+    .slice()
+    .sort((left, right) => left.id.localeCompare(right.id));
 }
 
 function formatTaskLabel(record: FleetExecutionRecord): string {

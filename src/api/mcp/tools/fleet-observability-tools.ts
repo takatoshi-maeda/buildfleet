@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { AgentMount } from "../../../../vendor/ai-kit/src/hono/index.js";
 import type {
   FleetActivityWatchEvent,
-  FleetLogsTailResult,
+  FleetLogsWatchEvent,
   FleetObservabilityService,
 } from "../../../domain/agents/fleet-observability-service.js";
 import { CodefleetError } from "../../../shared/errors.js";
@@ -28,6 +28,8 @@ const FleetLogsTailInputSchema = z.object({
   tailPerAgent: z.number().int().min(1).max(1000).optional(),
   contains: z.string().optional(),
   stream: z.boolean().optional(),
+  heartbeatSec: z.number().int().min(5).max(60).optional(),
+  maxDurationSec: z.number().int().min(1).max(1800).optional(),
   notificationToken: z.string().min(1).optional(),
 });
 
@@ -97,23 +99,33 @@ export function registerFleetObservabilityTools(
       executeTool(async () => {
         const input = FleetLogsTailInputSchema.parse(normalizeToolArgs(args));
         const requestedRole = resolveLogsTailRole(input);
-        const payload = await service.tailLogs({
+        if (input.stream) {
+          return service.watchLogsTail({
+            role: requestedRole,
+            agentId: input.agentId,
+            tailPerAgent: input.tailPerAgent ?? 100,
+            contains: input.contains,
+            heartbeatSec: input.heartbeatSec ?? 15,
+            maxDurationSec: input.maxDurationSec ?? 300,
+            notificationToken: input.notificationToken,
+            onEvent: async (event) => {
+              await sendWatchNotification(extra as NotificationSenderExtra, event);
+            },
+          });
+        }
+        return service.tailLogs({
           role: requestedRole,
           agentId: input.agentId,
           tailPerAgent: input.tailPerAgent ?? 100,
           contains: input.contains,
         });
-        if (input.stream && (extra as NotificationSenderExtra)?.sendNotification) {
-          await sendLogStreamNotifications(extra as NotificationSenderExtra, payload, input.notificationToken);
-        }
-        return payload;
       }),
   );
 }
 
 async function sendWatchNotification(
   extra: NotificationSenderExtra,
-  event: FleetActivityWatchEvent,
+  event: FleetActivityWatchEvent | FleetLogsWatchEvent,
 ): Promise<void> {
   if (!extra.sendNotification) {
     return;
@@ -121,42 +133,6 @@ async function sendWatchNotification(
   await extra.sendNotification({
     method: event.type,
     params: event.payload,
-  });
-}
-
-async function sendLogStreamNotifications(
-  extra: NotificationSenderExtra,
-  payload: FleetLogsTailResult,
-  notificationToken: string | undefined,
-): Promise<void> {
-  if (!extra.sendNotification) {
-    return;
-  }
-  let totalLineCount = 0;
-  for (const agent of payload.agents) {
-    totalLineCount += agent.lines.length;
-    await extra.sendNotification({
-      method: "fleet.logs.chunk",
-      params: withToken(
-        {
-          role: payload.role,
-          agentId: agent.agentId,
-          lines: agent.lines,
-        },
-        notificationToken,
-      ),
-    });
-  }
-  await extra.sendNotification({
-    method: "fleet.logs.complete",
-    params: withToken(
-      {
-        role: payload.role,
-        agentCount: payload.agents.length,
-        lineCount: totalLineCount,
-      },
-      notificationToken,
-    ),
   });
 }
 
@@ -230,13 +206,6 @@ function normalizeToolArgs(value: unknown): Record<string, unknown> {
     }
   }
   return value as Record<string, unknown>;
-}
-
-function withToken(payload: Record<string, unknown>, token: string | undefined): Record<string, unknown> {
-  if (!token) {
-    return payload;
-  }
-  return { ...payload, notificationToken: token };
 }
 
 function resolveLogsTailRole(input: { role?: z.infer<typeof AgentRoleSchema>; agentRole?: z.infer<typeof AgentRoleSchema> }) {
