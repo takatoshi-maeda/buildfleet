@@ -1,10 +1,10 @@
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import { mountMcpRoutes, type AgentMount } from "../../../vendor/ai-kit/src/hono/index.js";
+import { mountMcpRoutes, type AgentMount } from "ai-kit/hono";
 import { BacklogService } from "../../domain/backlog/backlog-service.js";
 import { FleetObservabilityService } from "../../domain/agents/fleet-observability-service.js";
-import { createCodefleetFrontDeskAgent } from "./agents/codefleet-front-desk.js";
+import { createCodefleetFrontDeskAgent, type CodefleetFrontDeskRuntimeConfig } from "./agents/codefleet-front-desk.js";
 import { registerBacklogMcpTools } from "./tools/backlog-tools.js";
 import { registerFleetObservabilityTools } from "./tools/fleet-observability-tools.js";
 import { JsonlMcpToolAuditLogger } from "./tools/mcp-tool-audit-log.js";
@@ -35,6 +35,7 @@ export interface McpApiServerOptions {
   toolAuditLogPath?: string;
   backlogService?: BacklogService;
   observabilityService?: FleetObservabilityService;
+  frontDesk?: CodefleetFrontDeskRuntimeConfig;
 }
 
 export async function buildMcpServer(options: McpApiServerOptions = {}): Promise<McpServerBuildResult> {
@@ -51,7 +52,7 @@ export async function buildMcpServer(options: McpApiServerOptions = {}): Promise
       {
         name: FRONT_DESK_AGENT_NAME,
         description: "User-facing support desk for backlog visibility",
-        create: createCodefleetFrontDeskAgent(backlogService),
+        create: createCodefleetFrontDeskAgent(backlogService, options.frontDesk),
       },
     ],
   });
@@ -88,6 +89,7 @@ export class McpApiServer {
   private readonly toolAuditLogPath: string;
   private readonly backlogService?: BacklogService;
   private readonly observabilityService?: FleetObservabilityService;
+  private readonly frontDesk?: CodefleetFrontDeskRuntimeConfig;
 
   constructor(options: McpApiServerOptions = {}) {
     this.host = options.host ?? DEFAULT_HOST;
@@ -96,6 +98,7 @@ export class McpApiServer {
     this.toolAuditLogPath = options.toolAuditLogPath ?? DEFAULT_TOOL_AUDIT_LOG_PATH;
     this.backlogService = options.backlogService;
     this.observabilityService = options.observabilityService;
+    this.frontDesk = options.frontDesk;
   }
 
   async start(): Promise<McpApiServerStatus> {
@@ -108,6 +111,7 @@ export class McpApiServer {
       toolAuditLogPath: this.toolAuditLogPath,
       backlogService: this.backlogService,
       observabilityService: this.observabilityService,
+      frontDesk: this.frontDesk,
     });
     try {
       await new Promise<void>((resolve, reject) => {

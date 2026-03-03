@@ -28,6 +28,7 @@
     "vitest": "^2.1.8"
   },
   "dependencies": {
+    "ai-kit": "file:vendor/ai-kit",
     "@hono/node-server": "^1.13.7",
     "@modelcontextprotocol/sdk": "^1.7.0",
     "ajv": "^8.17.1",

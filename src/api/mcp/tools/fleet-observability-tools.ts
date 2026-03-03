@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { AgentMount } from "../../../../vendor/ai-kit/src/hono/index.js";
+import type { AgentMount } from "ai-kit/hono";
 import type {
   FleetActivityWatchEvent,
   FleetLogsWatchEvent,
