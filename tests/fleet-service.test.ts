@@ -463,6 +463,33 @@ describe("FleetService", () => {
     expect(emittedEvent).toEqual({ type: "backlog.update" });
   });
 
+  it("runs orchestrator feedback-note.create prompt with event.path and no follow-up emit", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codefleet-fleet-"));
+    const rolesPath = path.join(tempDir, ".codefleet/roles.json");
+    const runtimeDir = path.join(tempDir, ".codefleet/runtime");
+    const logDir = path.join(tempDir, ".codefleet/logs/agents");
+    const appServer = new FakeAppServerClient();
+    const service = new FleetService(
+      rolesPath,
+      runtimeDir,
+      logDir,
+      new FakeProcessManager() as never,
+      appServer as never,
+    );
+
+    await service.up();
+    const emittedEvent = await service.dispatchAgentEvent({
+      agentId: "orchestrator-1",
+      agentRole: "Orchestrator",
+      event: { type: "feedback-note.create", path: ".codefleet/data/feedback-notes/01HXTEST0000000000000000.md" },
+    });
+
+    expect(emittedEvent).toBeNull();
+    expect(appServer.startedTurns[0]?.input[0]?.text).toContain(
+      "Feedback note path: .codefleet/data/feedback-notes/01HXTEST0000000000000000.md",
+    );
+  });
+
   it("runs before_start and after_complete hooks for the role", async () => {
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codefleet-fleet-"));
     const rolesPath = path.join(tempDir, ".codefleet/roles.json");

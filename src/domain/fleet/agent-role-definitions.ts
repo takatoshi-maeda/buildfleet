@@ -29,6 +29,10 @@ const AGENT_ROLE_DEFINITIONS: Record<AgentRole, AgentRoleDefinition> = {
         triggerEvent: "backlog.update",
         emitEvent: "backlog.update",
       },
+      "feedback-note.create": {
+        triggerEvent: "feedback-note.create",
+        emitEvent: null,
+      },
     },
   },
   Developer: {

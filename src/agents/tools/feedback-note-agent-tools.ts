@@ -48,10 +48,11 @@ export function createFeedbackNoteAgentTools(notesDir: string = DEFAULT_FEEDBACK
           createdAt: now,
         };
         await fs.mkdir(notesDir, { recursive: true });
+        const notePath = path.join(notesDir, `${record.id}.md`);
         // One-file-per-note keeps append operations simple and avoids coordination
         // hazards when multiple front-desk runs write feedback concurrently.
-        await fs.writeFile(path.join(notesDir, `${record.id}.md`), serializeFeedbackNote(record), "utf8");
-        return { note: record };
+        await fs.writeFile(notePath, serializeFeedbackNote(record), "utf8");
+        return { note: record, path: notePath };
       },
     },
     {

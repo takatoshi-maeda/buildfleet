@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 
 export type SystemEvent =
   | { type: "docs.update"; paths: string[] }
+  | { type: "feedback-note.create"; path: string }
   | { type: "acceptance-test.update" }
   | { type: "acceptance-test.required" }
   | { type: "backlog.update" }
@@ -12,6 +13,7 @@ export type SystemEvent =
 
 export const SYSTEM_EVENT_TYPES: ReadonlyArray<SystemEvent["type"]> = [
   "docs.update",
+  "feedback-note.create",
   "acceptance-test.update",
   "acceptance-test.required",
   "backlog.update",
@@ -59,6 +61,34 @@ export const SYSTEM_EVENT_COMMAND_DEFINITIONS: Record<SystemEvent["type"], Syste
         throw new Error("docs.update: --paths must include at least one path");
       }
       return { type: "docs.update", paths };
+    },
+  },
+  "feedback-note.create": {
+    description: "SystemEvent.type=feedback-note.create",
+    options: [
+      {
+        key: "path",
+        flags: "--path <path>",
+        description: "Project-root relative path to created feedback note markdown file",
+        required: true,
+        summaryToken: "--path <path>",
+      },
+    ],
+    createEvent(parsedOptions) {
+      const path = typeof parsedOptions.path === "string" ? parsedOptions.path.trim() : "";
+      if (path.length === 0) {
+        throw new Error("feedback-note.create: --path must be non-empty");
+      }
+      if (path.includes("..")) {
+        throw new Error("feedback-note.create: --path must not contain '..'");
+      }
+      if (path.startsWith("/") || /^[a-zA-Z]:[\\/]/u.test(path)) {
+        throw new Error("feedback-note.create: --path must be relative to project root");
+      }
+      if (!path.endsWith(".md")) {
+        throw new Error("feedback-note.create: --path must end with .md");
+      }
+      return { type: "feedback-note.create", path };
     },
   },
   "acceptance-test.update": {

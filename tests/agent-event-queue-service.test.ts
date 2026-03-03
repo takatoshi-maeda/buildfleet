@@ -317,6 +317,53 @@ describe("AgentEventQueueService", () => {
     expect(result.files).toHaveLength(1);
   });
 
+  it("enqueues feedback-note.create for running orchestrator", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codefleet-event-queue-"));
+    const runtimeDir = path.join(tempDir, ".codefleet", "runtime");
+    await fs.mkdir(runtimeDir, { recursive: true });
+
+    const runtimes: AgentRuntimeCollection = {
+      version: 1,
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      agents: [
+        {
+          id: "orchestrator-1",
+          role: "Orchestrator",
+          status: "running",
+          pid: 111,
+          cwd: tempDir,
+          startedAt: "2026-01-01T00:00:00.000Z",
+          lastHeartbeatAt: "2026-01-01T00:00:00.000Z",
+        },
+        {
+          id: "developer-1",
+          role: "Developer",
+          status: "running",
+          pid: 222,
+          cwd: tempDir,
+          startedAt: "2026-01-01T00:00:00.000Z",
+          lastHeartbeatAt: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+    };
+
+    await fs.writeFile(path.join(runtimeDir, "agents.json"), `${JSON.stringify(runtimes, null, 2)}\n`, "utf8");
+
+    const service = new AgentEventQueueService(runtimeDir);
+    const result = await service.enqueueToRunningAgents({
+      type: "feedback-note.create",
+      path: ".codefleet/data/feedback-notes/01HXTEST0000000000000000.md",
+    });
+
+    expect(result.enqueuedAgentIds).toEqual(["orchestrator-1"]);
+    expect(result.files).toHaveLength(1);
+    const message = JSON.parse(await fs.readFile(result.files[0], "utf8")) as {
+      event: { type: string; path?: string };
+    };
+    expect(message.event.type).toBe("feedback-note.create");
+    expect(message.event.path).toBe(".codefleet/data/feedback-notes/01HXTEST0000000000000000.md");
+  });
+
   it("drops backlog.epic.ready when same event is already pending/processing", async () => {
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codefleet-event-queue-"));
     const runtimeDir = path.join(tempDir, ".codefleet", "runtime");

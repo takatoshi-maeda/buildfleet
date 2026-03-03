@@ -20,12 +20,14 @@ describe("feedback note agent tools", () => {
       tags: ["ux", "cli"],
       priority: "high",
       reporter: "test-user",
-    })) as { note?: { id: string; summary: string; tags: string[]; priority: string } };
+    })) as { note?: { id: string; summary: string; tags: string[]; priority: string }; path?: string };
 
     expect(createResult.note?.id).toBeTruthy();
     expect(createResult.note?.summary).toBe("CLI output is hard to read");
     expect(createResult.note?.tags).toEqual(["ux", "cli"]);
     expect(createResult.note?.priority).toBe("high");
+    expect(createResult.path).toBeDefined();
+    expect(createResult.path?.endsWith(".md")).toBe(true);
     const files = await fs.readdir(tempDir);
     expect(files.some((file) => file.endsWith(".md"))).toBe(true);
 

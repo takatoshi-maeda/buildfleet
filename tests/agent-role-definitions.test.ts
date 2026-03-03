@@ -21,6 +21,12 @@ describe("agent-role-definitions", () => {
     expect(isRoleSubscribedToEvent("Reviewer", { type: "backlog.epic.review.ready", epicId: "E-001" })).toBe(true);
     expect(isRoleSubscribedToEvent("Reviewer", { type: "debug.playwright-test" })).toBe(true);
     expect(isRoleSubscribedToEvent("Orchestrator", { type: "acceptance-test.update" })).toBe(true);
+    expect(
+      isRoleSubscribedToEvent("Orchestrator", {
+        type: "feedback-note.create",
+        path: ".codefleet/data/feedback-notes/01HXTEST0000000000000000.md",
+      }),
+    ).toBe(true);
     expect(isRoleSubscribedToEvent("Orchestrator", { type: "backlog.update" })).toBe(false);
     expect(isRoleSubscribedToEvent("Gatekeeper", { type: "docs.update", paths: ["docs/a.md"] })).toBe(true);
   });
@@ -37,6 +43,10 @@ describe("agent-role-definitions", () => {
     const orchestratorPrompt = getRoleEventPromptDefinition("Orchestrator", "acceptance-test.update");
     expect(orchestratorPrompt.promptEventType).toBe("backlog.update");
     expect(orchestratorPrompt.emitEventType).toBe("backlog.update");
+
+    const orchestratorFeedbackPrompt = getRoleEventPromptDefinition("Orchestrator", "feedback-note.create");
+    expect(orchestratorFeedbackPrompt.promptEventType).toBe("feedback-note.create");
+    expect(orchestratorFeedbackPrompt.emitEventType).toBeNull();
 
     const defaultPrompt = getRoleEventPromptDefinition("Developer", "docs.update");
     expect(defaultPrompt.promptEventType).toBe("docs.update");
