@@ -1,11 +1,12 @@
 import { z } from "zod";
 import type { AgentMount } from "ai-kit/hono";
+import type { BacklogService } from "../../../domain/backlog/backlog-service.js";
 import {
   executeFleetActivityListTool,
-  executeFleetActivityWatchTool,
+  executeFleetWatchTool,
   executeFleetLogsTailTool,
   FleetActivityListInputSchema,
-  FleetActivityWatchInputSchema,
+  FleetWatchInputSchema,
   FleetLogsTailInputSchema,
 } from "../../../application/tools/fleet-observability-tools.js";
 import type {
@@ -13,6 +14,7 @@ import type {
   FleetLogsWatchEvent,
   FleetObservabilityService,
 } from "../../../domain/fleet/fleet-observability-service.js";
+import type { BacklogWatchEvent } from "../../../application/tools/backlog-tools.js";
 import { CodefleetError } from "../../../shared/errors.js";
 
 interface McpToolResult extends Record<string, unknown> {
@@ -27,10 +29,12 @@ interface RegisterFleetObservabilityToolsOptions {
 
 interface NotificationSenderExtra {
   sendNotification?: (input: { method: string; params: Record<string, unknown> }) => Promise<void>;
+  signal?: AbortSignal;
 }
 
 export function registerFleetObservabilityTools(
   mount: AgentMount,
+  backlogService: BacklogService,
   service: FleetObservabilityService,
   _options: RegisterFleetObservabilityToolsOptions = {},
 ): void {
@@ -45,16 +49,16 @@ export function registerFleetObservabilityTools(
   );
 
   mount.mcpServer.registerTool(
-    "fleet.activity.watch",
+    "fleet.watch",
     {
-      description: "Watch role-level fleet activity transitions",
-      inputSchema: FleetActivityWatchInputSchema.shape,
+      description: "Watch backlog/activity/logs streams over a single SSE connection",
+      inputSchema: FleetWatchInputSchema.shape,
     },
     async (args, extra) =>
       executeTool(async () =>
-        executeFleetActivityWatchTool(service, args, async (event) => {
+        executeFleetWatchTool(backlogService, service, args, async (event) => {
           await sendWatchNotification(extra as NotificationSenderExtra, event);
-        }),
+        }, (extra as NotificationSenderExtra | undefined)?.signal),
       ),
   );
 
@@ -64,18 +68,17 @@ export function registerFleetObservabilityTools(
       description: "Tail role-scoped agent logs",
       inputSchema: FleetLogsTailInputSchema.shape,
     },
-    async (args, extra) =>
-      executeTool(async () =>
-        executeFleetLogsTailTool(service, args, async (event) => {
-          await sendWatchNotification(extra as NotificationSenderExtra, event);
-        }),
-      ),
+    async (args) => executeTool(async () => executeFleetLogsTailTool(service, args)),
   );
 }
 
 async function sendWatchNotification(
   extra: NotificationSenderExtra,
-  event: FleetActivityWatchEvent | FleetLogsWatchEvent,
+  event:
+    | BacklogWatchEvent
+    | FleetActivityWatchEvent
+    | FleetLogsWatchEvent
+    | { type: "fleet.watch.error" | "fleet.watch.complete"; payload: Record<string, unknown> },
 ): Promise<void> {
   if (!extra.sendNotification) {
     return;

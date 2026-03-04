@@ -4,7 +4,6 @@ import {
   executeBacklogTool,
   listBacklogToolDefinitions,
   normalizeToolArgs,
-  type BacklogWatchEvent,
   type BacklogToolName,
 } from "../../../application/tools/backlog-tools.js";
 import type { McpToolAuditLogEntry, McpToolAuditLogger } from "./mcp-tool-audit-log.js";
@@ -12,11 +11,6 @@ import type { McpToolAuditLogEntry, McpToolAuditLogger } from "./mcp-tool-audit-
 interface RegisterBacklogMcpToolsOptions {
   agentName?: string;
   logger?: McpToolAuditLogger;
-}
-
-interface NotificationSenderExtra {
-  sendNotification?: (input: { method: string; params: Record<string, unknown> }) => Promise<void>;
-  signal?: AbortSignal;
 }
 
 export function registerBacklogMcpTools(
@@ -32,37 +26,17 @@ export function registerBacklogMcpTools(
         description: definition.description,
         inputSchema: definition.mcpInputSchema,
       },
-      async (args, extra) =>
+      async (args) =>
         executeTool({
           toolName: definition.name,
           args,
           agentName,
           logger: options.logger,
           run: async () =>
-            executeBacklogTool(
-              service,
-              definition.name,
-              args,
-              definition.name === "backlog.watch"
-                ? {
-                    onWatchEvent: async (event) => sendWatchNotification(extra as NotificationSenderExtra, event),
-                    signal: (extra as NotificationSenderExtra | undefined)?.signal,
-                  }
-                : undefined,
-            ),
+            executeBacklogTool(service, definition.name, args),
         }),
     );
   }
-}
-
-async function sendWatchNotification(extra: NotificationSenderExtra, event: BacklogWatchEvent): Promise<void> {
-  if (!extra.sendNotification) {
-    return;
-  }
-  await extra.sendNotification({
-    method: event.type,
-    params: event.payload,
-  });
 }
 
 async function executeTool(input: {

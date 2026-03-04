@@ -87,36 +87,22 @@ describe("McpApiServer", () => {
       expect(activityList.result?.isError).toBe(false);
       expect(Array.isArray(activityList.result?.structuredContent?.roles)).toBe(true);
 
-      const logsTailStreamResponse = await fetch(
-        `http://127.0.0.1:${port}/api/mcp/codefleet.front-desk/tools/call/fleet.logs.tail`,
-        {
-          method: "POST",
-          headers: {
-            "content-type": "application/json",
-          },
-          body: JSON.stringify({ arguments: { stream: true, tailPerAgent: 10, maxDurationSec: 1, heartbeatSec: 5 } }),
-        },
-      );
-      expect(logsTailStreamResponse.status).toBe(200);
-      expect(logsTailStreamResponse.headers.get("content-type")).toContain("text/event-stream");
-      const logsTailStreamBody = await logsTailStreamResponse.text();
-      expect(logsTailStreamBody).toContain("\"method\":\"fleet.logs.complete\"");
-
-      const backlogWatchStreamResponse = await fetch(
-        `http://127.0.0.1:${port}/api/mcp/codefleet.front-desk/tools/call/backlog.watch`,
+      const fleetWatchStreamResponse = await fetch(
+        `http://127.0.0.1:${port}/api/mcp/codefleet.front-desk/tools/call/fleet.watch`,
         {
           method: "POST",
           headers: {
             "content-type": "application/json",
             accept: "text/event-stream",
           },
-          body: JSON.stringify({ arguments: { includeSnapshot: false, maxDurationSec: 1, heartbeatSec: 5 } }),
+          body: JSON.stringify({ arguments: { heartbeatSec: 5 } }),
         },
       );
-      expect(backlogWatchStreamResponse.status).toBe(200);
-      expect(backlogWatchStreamResponse.headers.get("content-type")).toContain("text/event-stream");
-      const backlogWatchStreamBody = await backlogWatchStreamResponse.text();
-      expect(backlogWatchStreamBody).toContain("\"method\":\"backlog.complete\"");
+      expect(fleetWatchStreamResponse.status).toBe(200);
+      expect(fleetWatchStreamResponse.headers.get("content-type")).toContain("text/event-stream");
+      const fleetWatchStreamBody = await readSseChunks(fleetWatchStreamResponse, 2);
+      expect(fleetWatchStreamBody).toContain("\"method\":\"backlog.snapshot\"");
+      expect(fleetWatchStreamBody).toContain("\"method\":\"fleet.activity.snapshot\"");
 
       const notFound = await callTool(port, "backlog.item.get", { id: "I-404" });
       expect(notFound.result?.isError).toBe(true);
@@ -150,14 +136,14 @@ describe("McpApiServer", () => {
 
     await server.start();
     const streamResponse = await fetch(
-      `http://127.0.0.1:${port}/api/mcp/codefleet.front-desk/tools/call/backlog.watch`,
+      `http://127.0.0.1:${port}/api/mcp/codefleet.front-desk/tools/call/fleet.watch`,
       {
         method: "POST",
         headers: {
           "content-type": "application/json",
           accept: "text/event-stream",
         },
-        body: JSON.stringify({ arguments: { includeSnapshot: false, maxDurationSec: 60, heartbeatSec: 30 } }),
+        body: JSON.stringify({ arguments: { heartbeatSec: 30 } }),
       },
     );
     expect(streamResponse.status).toBe(200);
@@ -354,6 +340,29 @@ describe("McpApiServer", () => {
     }
   });
 });
+
+async function readSseChunks(response: Response, chunkCount: number): Promise<string> {
+  const reader = response.body?.getReader();
+  if (!reader) {
+    return "";
+  }
+  const decoder = new TextDecoder();
+  let chunks = "";
+  let reads = 0;
+  try {
+    while (reads < chunkCount) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      chunks += decoder.decode(value, { stream: true });
+      reads += 1;
+    }
+  } finally {
+    await reader.cancel();
+  }
+  return chunks;
+}
 
 async function callTool(port: number, tool: string, args: Record<string, unknown>) {
   const response = await fetch(`http://127.0.0.1:${port}/api/mcp/codefleet.front-desk/tools/call/${tool}`, {

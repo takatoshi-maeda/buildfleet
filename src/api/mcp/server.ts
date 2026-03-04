@@ -74,7 +74,7 @@ export async function buildMcpServer(options: McpApiServerOptions = {}): Promise
       agentName: FRONT_DESK_AGENT_NAME,
       logger: toolAuditLogger,
     });
-    registerFleetObservabilityTools(frontDeskMount, observabilityService, {
+    registerFleetObservabilityTools(frontDeskMount, backlogService, observabilityService, {
       agentName: FRONT_DESK_AGENT_NAME,
     });
   }

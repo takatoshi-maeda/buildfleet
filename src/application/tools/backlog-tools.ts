@@ -67,8 +67,7 @@ export type BacklogToolName =
   | "backlog.epic.list"
   | "backlog.epic.get"
   | "backlog.item.list"
-  | "backlog.item.get"
-  | "backlog.watch";
+  | "backlog.item.get";
 
 export interface ExecuteBacklogToolOptions {
   onWatchEvent?: (event: BacklogWatchEvent) => Promise<void>;
@@ -156,14 +155,6 @@ const BACKLOG_TOOL_DEFINITIONS: BacklogToolDefinition[] = [
       const input = BacklogItemGetInputSchema.parse(normalizeToolArgs(rawArgs));
       return { item: await service.readItem(input) };
     },
-  },
-  {
-    name: "backlog.watch",
-    description: "Watch backlog changes and emit MCP notifications",
-    mcpInputSchema: BacklogWatchInputSchema.shape,
-    parameters: BacklogWatchInputSchema,
-    run: async (service, rawArgs, options) =>
-      executeBacklogWatchTool(service, rawArgs, options.onWatchEvent, options.signal),
   },
 ];
 

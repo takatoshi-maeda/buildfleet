@@ -66,8 +66,9 @@ export interface FleetActivityWatchEvent {
 export interface FleetActivityWatchInput extends FleetActivityListInput {
   includeAgents?: boolean;
   heartbeatSec: number;
-  maxDurationSec: number;
+  maxDurationSec?: number;
   notificationToken?: string;
+  signal?: AbortSignal;
   onEvent?: (event: FleetActivityWatchEvent) => Promise<void>;
 }
 
@@ -90,8 +91,9 @@ export interface FleetLogsWatchEvent {
 
 export interface FleetLogsTailWatchInput extends FleetLogsTailInput {
   heartbeatSec: number;
-  maxDurationSec: number;
+  maxDurationSec?: number;
   notificationToken?: string;
+  signal?: AbortSignal;
   onEvent?: (event: FleetLogsWatchEvent) => Promise<void>;
 }
 
@@ -182,10 +184,12 @@ export class FleetObservabilityService {
     });
     eventCount += 1;
 
-    const timeoutAt = Date.now() + input.maxDurationSec * 1_000;
+    const timeoutAt = Number.isInteger(input.maxDurationSec)
+      ? Date.now() + (input.maxDurationSec as number) * 1_000
+      : null;
     let lastHeartbeatAt = Date.now();
-    while (Date.now() < timeoutAt) {
-      await sleep(DEFAULT_WATCH_POLL_MS);
+    while (!input.signal?.aborted && (timeoutAt === null || Date.now() < timeoutAt)) {
+      await sleep(DEFAULT_WATCH_POLL_MS, input.signal);
       const next = await this.listActivity(input);
       const changes = detectActivityChanges(previous, next);
       for (const change of changes) {
@@ -208,12 +212,13 @@ export class FleetObservabilityService {
     }
 
     const endedAt = new Date().toISOString();
+    const reason: FleetWatchResult["reason"] = input.signal?.aborted ? "client_closed" : "timeout";
     await emitEvent(input.onEvent, {
       type: "fleet.activity.complete",
       payload: withToken(
         {
           eventCount,
-          reason: "timeout",
+          reason,
         },
         input.notificationToken,
       ),
@@ -223,7 +228,7 @@ export class FleetObservabilityService {
       startedAt,
       endedAt,
       eventCount,
-      reason: "timeout",
+      reason,
     };
   }
 
@@ -313,10 +318,12 @@ export class FleetObservabilityService {
       }
     }
 
-    const timeoutAt = Date.now() + input.maxDurationSec * 1_000;
+    const timeoutAt = Number.isInteger(input.maxDurationSec)
+      ? Date.now() + (input.maxDurationSec as number) * 1_000
+      : null;
     let lastHeartbeatAt = Date.now();
-    while (Date.now() < timeoutAt) {
-      await sleep(DEFAULT_WATCH_POLL_MS);
+    while (!input.signal?.aborted && (timeoutAt === null || Date.now() < timeoutAt)) {
+      await sleep(DEFAULT_WATCH_POLL_MS, input.signal);
       for (const target of targets) {
         const sourceLines = await this.readAgentLogLines(target.id);
         const previousOffset = offsets.get(target.id) ?? 0;
@@ -360,17 +367,19 @@ export class FleetObservabilityService {
           role: input.role ?? null,
           agentCount: targets.length,
           lineCount: totalLineCount,
+          reason: input.signal?.aborted ? "client_closed" : "timeout",
         },
         input.notificationToken,
       ),
     });
     eventCount += 1;
 
+    const reason: FleetWatchResult["reason"] = input.signal?.aborted ? "client_closed" : "timeout";
     return {
       startedAt,
       endedAt,
       eventCount,
-      reason: "timeout",
+      reason,
     };
   }
 
@@ -470,6 +479,23 @@ async function emitEvent<T extends { payload: Record<string, unknown> }>(
   await emitter(event);
 }
 
+function sleep(durationMs: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    const timeout = setTimeout(resolve, durationMs);
+    if (!signal) {
+      return;
+    }
+    const onAbort = () => {
+      clearTimeout(timeout);
+      resolve();
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
 async function readRuntime(filePath: string): Promise<AgentRuntimeCollection> {
   try {
     const raw = await fs.readFile(filePath, "utf8");
@@ -544,8 +570,4 @@ function clampListLimit(value: number | undefined): number {
     return 50;
   }
   return Math.min(value ?? 50, 200);
-}
-
-function sleep(durationMs: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, durationMs));
 }
