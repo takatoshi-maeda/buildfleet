@@ -20,6 +20,9 @@ interface BacklogChangeLogEntry {
   reason: string;
   createdAt: string;
   itemsJsonVersion: number;
+  targetType?: "epic" | "item" | "question";
+  targetId?: string;
+  targets?: Array<{ type: "epic" | "item" | "question"; id: string }>;
 }
 
 export interface BacklogWatchResult {
@@ -101,6 +104,13 @@ export class BacklogObservabilityService {
               operation: entry.operation,
               reason: entry.reason,
               itemsJsonVersion: entry.itemsJsonVersion,
+              ...(entry.targetType && entry.targetId
+                ? {
+                    targetType: entry.targetType,
+                    targetId: entry.targetId,
+                  }
+                : {}),
+              ...(entry.targets && entry.targets.length > 0 ? { targets: entry.targets } : {}),
             },
             input.notificationToken,
           ),
@@ -203,6 +213,9 @@ function parseChangeLogEntry(line: string): BacklogChangeLogEntry | null {
     reason?: unknown;
     createdAt?: unknown;
     itemsJsonVersion?: unknown;
+    targetType?: unknown;
+    targetId?: unknown;
+    targets?: unknown;
   };
   if (
     typeof entry.id !== "string" ||
@@ -220,7 +233,33 @@ function parseChangeLogEntry(line: string): BacklogChangeLogEntry | null {
     reason: entry.reason,
     createdAt: entry.createdAt,
     itemsJsonVersion: entry.itemsJsonVersion,
+    ...(isChangeTargetType(entry.targetType) && typeof entry.targetId === "string"
+      ? {
+          targetType: entry.targetType,
+          targetId: entry.targetId,
+        }
+      : {}),
+    ...(Array.isArray(entry.targets) ? { targets: parseChangeTargets(entry.targets) } : {}),
   };
+}
+
+function isChangeTargetType(value: unknown): value is "epic" | "item" | "question" {
+  return value === "epic" || value === "item" || value === "question";
+}
+
+function parseChangeTargets(value: unknown[]): Array<{ type: "epic" | "item" | "question"; id: string }> {
+  const targets: Array<{ type: "epic" | "item" | "question"; id: string }> = [];
+  for (const entry of value) {
+    if (!entry || typeof entry !== "object") {
+      continue;
+    }
+    const target = entry as { type?: unknown; id?: unknown };
+    if (!isChangeTargetType(target.type) || typeof target.id !== "string" || target.id.trim().length === 0) {
+      continue;
+    }
+    targets.push({ type: target.type, id: target.id });
+  }
+  return targets;
 }
 
 function withToken(payload: Record<string, unknown>, token: string | undefined): Record<string, unknown> {

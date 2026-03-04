@@ -28,6 +28,12 @@ const READY_EPIC_STATUSES: BacklogEpicStatus[] = ["todo", "changes-requested", "
 
 type AgentRole = "Orchestrator" | "Developer" | "Polisher" | "Gatekeeper" | "Reviewer";
 type JsonLogValue = string | number | boolean | null | JsonLogValue[] | { [key: string]: JsonLogValue };
+type BacklogChangeTargetType = "epic" | "item" | "question";
+
+interface BacklogChangeTarget {
+  type: BacklogChangeTargetType;
+  id: string;
+}
 
 interface ListInput {
   status?: BacklogEpicStatus | BacklogItemStatus;
@@ -250,6 +256,7 @@ export class BacklogService {
       "epic.claim-ready-for-implementation",
       { actorId },
       `epic claimed for implementation: ${candidate.id}`,
+      [{ type: "epic", id: candidate.id }],
     );
     return candidate;
   }
@@ -291,6 +298,10 @@ export class BacklogService {
       "backlog.update-status-all-todo",
       { actorId },
       `epic/item statuses reset to todo; epics updated: ${updatedEpicIds.length}${epicSummary}; items updated: ${updatedItemIds.length}${itemSummary}`,
+      [
+        ...updatedEpicIds.map((id) => ({ type: "epic" as const, id })),
+        ...updatedItemIds.map((id) => ({ type: "item" as const, id })),
+      ],
     );
     return { updatedEpicIds, updatedItemIds };
   }
@@ -332,6 +343,10 @@ export class BacklogService {
       "backlog.reset-in-progress-to-todo",
       { actorId },
       `in-progress epic/item statuses reset to todo; epics updated: ${updatedEpicIds.length}${epicSummary}; items updated: ${updatedItemIds.length}${itemSummary}`,
+      [
+        ...updatedEpicIds.map((id) => ({ type: "epic" as const, id })),
+        ...updatedItemIds.map((id) => ({ type: "item" as const, id })),
+      ],
     );
     return { updatedEpicIds, updatedItemIds };
   }
@@ -356,7 +371,7 @@ export class BacklogService {
     items.epics.push(epic);
     items.updatedAt = now;
 
-    await this.persistWithChangeLog(items, "epic.add", input, `epic added: ${epic.id}`);
+    await this.persistWithChangeLog(items, "epic.add", input, `epic added: ${epic.id}`, [{ type: "epic", id: epic.id }]);
     return epic;
   }
 
@@ -400,7 +415,7 @@ export class BacklogService {
     epic.updatedAt = now;
     items.updatedAt = now;
 
-    await this.persistWithChangeLog(items, "epic.update", input, `epic updated: ${epic.id}`);
+    await this.persistWithChangeLog(items, "epic.update", input, `epic updated: ${epic.id}`, [{ type: "epic", id: epic.id }]);
     return epic;
   }
 
@@ -422,7 +437,14 @@ export class BacklogService {
     }
     items.updatedAt = new Date().toISOString();
 
-    await this.persistWithChangeLog(items, "epic.delete", { id, force, actorId }, `epic deleted: ${id}`);
+    const removedItemTargets = force ? linkedItems.map((item) => ({ type: "item" as const, id: item.id })) : [];
+    await this.persistWithChangeLog(
+      items,
+      "epic.delete",
+      { id, force, actorId },
+      `epic deleted: ${id}`,
+      [{ type: "epic", id }, ...removedItemTargets],
+    );
   }
 
   async addItem(input: AddItemInput): Promise<BacklogItem> {
@@ -450,7 +472,7 @@ export class BacklogService {
     items.items.push(item);
     items.updatedAt = now;
 
-    await this.persistWithChangeLog(items, "item.add", input, `item added: ${item.id}`);
+    await this.persistWithChangeLog(items, "item.add", input, `item added: ${item.id}`, [{ type: "item", id: item.id }]);
     return item;
   }
 
@@ -488,7 +510,7 @@ export class BacklogService {
     item.updatedAt = now;
     items.updatedAt = now;
 
-    await this.persistWithChangeLog(items, "item.update", input, `item updated: ${item.id}`);
+    await this.persistWithChangeLog(items, "item.update", input, `item updated: ${item.id}`, [{ type: "item", id: item.id }]);
     return item;
   }
 
@@ -502,7 +524,7 @@ export class BacklogService {
     items.items.splice(index, 1);
     items.updatedAt = new Date().toISOString();
 
-    await this.persistWithChangeLog(items, "item.delete", { id, actorId }, `item deleted: ${id}`);
+    await this.persistWithChangeLog(items, "item.delete", { id, actorId }, `item deleted: ${id}`, [{ type: "item", id }]);
   }
 
   async readItem(input: ReadByIdInput): Promise<BacklogItem> {
@@ -531,7 +553,9 @@ export class BacklogService {
     };
     items.questions.push(question);
     items.updatedAt = now;
-    await this.persistWithChangeLog(items, "question.add", input, `question added: ${question.id}`);
+    await this.persistWithChangeLog(items, "question.add", input, `question added: ${question.id}`, [
+      { type: "question", id: question.id },
+    ]);
     return question;
   }
 
@@ -558,7 +582,9 @@ export class BacklogService {
     const now = new Date().toISOString();
     question.updatedAt = now;
     items.updatedAt = now;
-    await this.persistWithChangeLog(items, "question.update", input, `question updated: ${question.id}`);
+    await this.persistWithChangeLog(items, "question.update", input, `question updated: ${question.id}`, [
+      { type: "question", id: question.id },
+    ]);
     return question;
   }
 
@@ -574,7 +600,9 @@ export class BacklogService {
     const now = new Date().toISOString();
     question.updatedAt = now;
     items.updatedAt = now;
-    await this.persistWithChangeLog(items, "question.answer", input, `question answered: ${question.id}`);
+    await this.persistWithChangeLog(items, "question.answer", input, `question answered: ${question.id}`, [
+      { type: "question", id: question.id },
+    ]);
     return question;
   }
 
@@ -587,7 +615,9 @@ export class BacklogService {
 
     items.questions.splice(index, 1);
     items.updatedAt = new Date().toISOString();
-    await this.persistWithChangeLog(items, "question.delete", { id, actorId }, `question deleted: ${id}`);
+    await this.persistWithChangeLog(items, "question.delete", { id, actorId }, `question deleted: ${id}`, [
+      { type: "question", id },
+    ]);
   }
 
   private async getOrInitializeItems(): Promise<NormalizedBacklogItems> {
@@ -640,12 +670,13 @@ export class BacklogService {
     operation: string,
     parameters: object,
     fallbackReason: string,
+    changeTargets: readonly BacklogChangeTarget[] = [],
   ): Promise<void> {
     // Keep persistence order explicit: items.json first, then change-log append.
     // If the process crashes between these writes, snapshot guard detects the gap and
     // blocks wait-implementation reads until a complete change-log is present.
     await this.itemsRepository.save(items);
-    await this.writeChangeLog(operation, parameters, fallbackReason, items.version);
+    await this.writeChangeLog(operation, parameters, fallbackReason, items.version, changeTargets);
   }
 
   private async writeChangeLog(
@@ -653,6 +684,7 @@ export class BacklogService {
     parameters: object,
     fallbackReason: string,
     itemsVersion: number,
+    changeTargets: readonly BacklogChangeTarget[],
   ): Promise<void> {
     await fs.mkdir(this.backlogDir, { recursive: true });
     const changeLogPath = path.join(this.backlogDir, CHANGE_LOG_JSONL_PATH);
@@ -660,6 +692,8 @@ export class BacklogService {
     const now = new Date();
     const createdAt = now.toISOString();
     const changeId = await this.nextChangeLogId(now, changeLogPath);
+    const targets = normalizeChangeTargets(changeTargets);
+    const singleTarget = targets.length === 1 ? targets[0] : undefined;
     const entry = {
       id: changeId,
       type: "backlog-update" as const,
@@ -668,6 +702,9 @@ export class BacklogService {
       createdAt,
       itemsJsonVersion: itemsVersion,
       reason: this.buildChangeReason(operation, parameters, fallbackReason),
+      ...(targets.length > 0 ? { targets } : {}),
+      // Keep single-target fields for clients that only need one id/type without array handling.
+      ...(singleTarget ? { targetType: singleTarget.type, targetId: singleTarget.id } : {}),
     };
 
     await fs.appendFile(changeLogPath, `${JSON.stringify(entry)}\n`, "utf8");
@@ -754,6 +791,24 @@ function sanitizeForJsonLog(value: unknown): JsonLogValue {
     return Object.fromEntries(entries);
   }
   return String(value);
+}
+
+function normalizeChangeTargets(targets: readonly BacklogChangeTarget[]): BacklogChangeTarget[] {
+  const seen = new Set<string>();
+  const normalized: BacklogChangeTarget[] = [];
+  for (const target of targets) {
+    const id = target.id.trim();
+    if (id.length === 0) {
+      continue;
+    }
+    const key = `${target.type}:${id}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    normalized.push({ type: target.type, id });
+  }
+  return normalized;
 }
 
 function defaultVisibility(): VisibilityRule {

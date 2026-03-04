@@ -54,6 +54,36 @@ describe("BacklogObservabilityService", () => {
     expect(changed?.payload.operation).toBe("epic.add");
     expect(changed?.payload.itemsJsonVersion).toBe(1);
     expect(typeof changed?.payload.changeId).toBe("string");
+    expect(changed?.payload.targetType).toBe("epic");
+    expect(changed?.payload.targetId).toBe("E-001");
+    expect(changed?.payload.targets).toEqual([{ type: "epic", id: "E-001" }]);
+  });
+
+  it("includes epic target in backlog.changed for claim-ready-for-implementation", async () => {
+    const fixture = await createBacklogFixture();
+    const events: BacklogWatchEvent[] = [];
+
+    await fixture.backlogService.addEpic({ title: "claim me", acceptanceTestIds: [] });
+
+    const watchPromise = fixture.observability.watchBacklog({
+      includeSnapshot: false,
+      heartbeatSec: 60,
+      maxDurationSec: 2,
+      onEvent: async (event) => {
+        events.push(event);
+      },
+    });
+
+    await sleep(200);
+    await fixture.backlogService.claimReadyEpicForImplementation("developer-1");
+    await watchPromise;
+
+    const changed = events.find(
+      (event) => event.type === "backlog.changed" && event.payload.operation === "epic.claim-ready-for-implementation",
+    );
+    expect(changed?.payload.targetType).toBe("epic");
+    expect(changed?.payload.targetId).toBe("E-001");
+    expect(changed?.payload.targets).toEqual([{ type: "epic", id: "E-001" }]);
   });
 
   it("emits backlog.heartbeat and backlog.complete during watch", async () => {

@@ -40,6 +40,9 @@ describe("BacklogService", () => {
             parameters: Record<string, unknown>;
             actor?: unknown;
             reason: string;
+            targetType?: string;
+            targetId?: string;
+            targets?: Array<{ type: string; id: string }>;
           },
       );
 
@@ -50,8 +53,14 @@ describe("BacklogService", () => {
     expect(entries[0]?.actor).toBeUndefined();
     expect(entries[0]?.operation).toBe("epic.add");
     expect(entries[0]?.parameters).toEqual({ title: "epic", acceptanceTestIds: [] });
+    expect(entries[0]?.targetType).toBe("epic");
+    expect(entries[0]?.targetId).toBe("E-001");
+    expect(entries[0]?.targets).toEqual([{ type: "epic", id: "E-001" }]);
     expect(entries[1]?.operation).toBe("item.add");
     expect(entries[1]?.parameters).toEqual({ epicId: "E-001", title: "item", acceptanceTestIds: [], actorId: "dev-agent" });
+    expect(entries[1]?.targetType).toBe("item");
+    expect(entries[1]?.targetId).toBe("I-001");
+    expect(entries[1]?.targets).toEqual([{ type: "item", id: "I-001" }]);
     expect(entries[0]?.reason).toContain("epic added: E-001");
     expect(entries[0]?.reason).toContain("trigger: system");
     expect(entries[1]?.reason).toContain("item added: I-001");
