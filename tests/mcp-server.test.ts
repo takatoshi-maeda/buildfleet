@@ -119,6 +119,25 @@ describe("McpApiServer", () => {
       const agentList = await callTool(port, "agent.run", { message: "item一覧を見せて" });
       expect(agentList.result?.isError).toBe(false);
       expect(String(agentList.result?.structuredContent?.message ?? "")).toContain("tool: backlog_item_list");
+
+      const imageSessionId = `sess-image-${Date.now().toString(16)}`;
+      const imageInput = [
+        {
+          type: "image",
+          source: { type: "url", url: "https://example.com/mock-image.png" },
+        },
+        { type: "text", text: "この画像の要点を教えて" },
+      ];
+      const multimodalRun = await callTool(port, "agent.run", {
+        sessionId: imageSessionId,
+        input: imageInput,
+      });
+      expect(multimodalRun.result?.isError).toBe(false);
+
+      const conversation = await callTool(port, "conversations.get", { sessionId: imageSessionId });
+      expect(conversation.result?.isError).toBe(false);
+      const firstTurn = conversation.result?.structuredContent?.turns?.[0] as { userContent?: unknown } | undefined;
+      expect(firstTurn?.userContent).toEqual(imageInput);
     } finally {
       await server.stop();
     }
