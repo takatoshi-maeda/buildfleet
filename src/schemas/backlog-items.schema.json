@@ -19,8 +19,22 @@
           "kind": { "type": "string", "enum": ["product", "technical"] },
           "notes": {
             "type": "array",
-            "items": { "type": "string", "minLength": 1 },
-            "uniqueItems": true
+            "items": {
+              "oneOf": [
+                { "type": "string", "minLength": 1 },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["id", "content", "createdAt"],
+                  "properties": {
+                    "id": { "type": "string", "minLength": 1 },
+                    "content": { "type": "string", "minLength": 1 },
+                    "createdAt": { "type": "string", "format": "date-time" },
+                    "createdBy": { "type": "string", "minLength": 1 }
+                  }
+                }
+              ]
+            }
           },
           "status": {
             "type": "string",
@@ -61,8 +75,22 @@
           "kind": { "type": "string", "enum": ["product", "technical"] },
           "notes": {
             "type": "array",
-            "items": { "type": "string", "minLength": 1 },
-            "uniqueItems": true
+            "items": {
+              "oneOf": [
+                { "type": "string", "minLength": 1 },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["id", "content", "createdAt"],
+                  "properties": {
+                    "id": { "type": "string", "minLength": 1 },
+                    "content": { "type": "string", "minLength": 1 },
+                    "createdAt": { "type": "string", "format": "date-time" },
+                    "createdBy": { "type": "string", "minLength": 1 }
+                  }
+                }
+              ]
+            }
           },
           "status": {
             "type": "string",

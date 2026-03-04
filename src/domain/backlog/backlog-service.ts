@@ -9,6 +9,7 @@ import type {
   BacklogItem,
   BacklogItems,
   BacklogItemStatus,
+  BacklogNote,
   BacklogQuestion,
   BacklogQuestionStatus,
   BacklogWorkKind,
@@ -17,6 +18,7 @@ import type {
 import type { Roles } from "../roles-model.js";
 import { SCHEMA_PATHS } from "../schema-paths.js";
 import { ensureAcceptanceTestIdsExist } from "../relations/acceptance-test-relations.js";
+import { createUlid } from "../../shared/ulid.js";
 import { ensureStableBacklogSnapshot } from "./stable-snapshot-guard.js";
 import { ensureValidEpicStatusTransition, ensureValidItemStatusTransition } from "./status-transition.js";
 
@@ -361,7 +363,7 @@ export class BacklogService {
       id: nextEpicId(items.epics),
       title: input.title,
       kind: input.kind ?? "product",
-      notes: unique(input.notes ?? []),
+      notes: buildNotes([], input.notes, input.actorId, now),
       status: input.status ?? "todo",
       visibility: input.visibility ?? defaultVisibility(),
       acceptanceTestIds: unique(input.acceptanceTestIds),
@@ -403,8 +405,7 @@ export class BacklogService {
     }
 
     if (input.addNotes || input.removeNotes) {
-      const removeSet = new Set(input.removeNotes ?? []);
-      epic.notes = unique([...(epic.notes ?? []), ...(input.addNotes ?? [])].filter((note) => !removeSet.has(note)));
+      epic.notes = updateNotes(epic.notes ?? [], input.addNotes, input.removeNotes, input.actorId);
     }
 
     if (input.visibility) {
@@ -463,7 +464,7 @@ export class BacklogService {
       epicId: input.epicId,
       title: input.title,
       kind: input.kind ?? "product",
-      notes: unique(input.notes ?? []),
+      notes: buildNotes([], input.notes, input.actorId, now),
       status: input.status ?? "todo",
       acceptanceTestIds: unique(input.acceptanceTestIds),
       updatedAt: now,
@@ -502,8 +503,7 @@ export class BacklogService {
     }
 
     if (input.addNotes || input.removeNotes) {
-      const removeSet = new Set(input.removeNotes ?? []);
-      item.notes = unique([...(item.notes ?? []), ...(input.addNotes ?? [])].filter((note) => !removeSet.has(note)));
+      item.notes = updateNotes(item.notes ?? [], input.addNotes, input.removeNotes, input.actorId);
     }
 
     const now = new Date().toISOString();
@@ -861,8 +861,16 @@ function nextQuestionId(questions: BacklogQuestion[]): string {
 function normalizeBacklogItems(items: BacklogItems): NormalizedBacklogItems {
   return {
     ...items,
-    epics: items.epics.map((epic) => ({ ...epic, kind: epic.kind ?? "product" })),
-    items: items.items.map((item) => ({ ...item, kind: item.kind ?? "product" })),
+    epics: items.epics.map((epic) => ({
+      ...epic,
+      kind: epic.kind ?? "product",
+      notes: normalizeNotes(epic.notes, epic.updatedAt),
+    })),
+    items: items.items.map((item) => ({
+      ...item,
+      kind: item.kind ?? "product",
+      notes: normalizeNotes(item.notes, item.updatedAt),
+    })),
     questions: items.questions ? [...items.questions] : [],
   };
 }
@@ -879,4 +887,65 @@ function isVisible(epic: BacklogEpic, epicsById: Map<string, BacklogEpic>): bool
 
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {
   return error instanceof Error;
+}
+
+function normalizeNotes(
+  notes: ReadonlyArray<BacklogNote | string> | undefined,
+  fallbackCreatedAt: string,
+): BacklogNote[] | undefined {
+  if (!notes || notes.length === 0) {
+    return notes ? [] : undefined;
+  }
+
+  return notes
+    .map((note, index) => {
+      if (typeof note === "string") {
+        return {
+          id: `legacy-note-${index + 1}`,
+          content: note,
+          createdAt: fallbackCreatedAt,
+        } satisfies BacklogNote;
+      }
+      return note;
+    })
+    .filter((note) => note.content.trim().length > 0);
+}
+
+function buildNotes(
+  existing: ReadonlyArray<BacklogNote>,
+  addedContents: ReadonlyArray<string> | undefined,
+  actorId: string | undefined,
+  createdAt: string,
+): BacklogNote[] {
+  const normalizedExisting = normalizeNotes(existing, createdAt) ?? [];
+  if (!addedContents || addedContents.length === 0) {
+    return normalizedExisting;
+  }
+
+  const known = new Set(normalizedExisting.map((note) => note.content));
+  const added = addedContents
+    .map((content) => content.trim())
+    .filter((content) => content.length > 0 && !known.has(content))
+    .map((content) => {
+      known.add(content);
+      const note: BacklogNote = {
+        id: createUlid(),
+        content,
+        createdAt,
+        ...(actorId ? { createdBy: actorId } : {}),
+      };
+      return note;
+    });
+  return [...normalizedExisting, ...added];
+}
+
+function updateNotes(
+  existing: ReadonlyArray<BacklogNote>,
+  addNotes: ReadonlyArray<string> | undefined,
+  removeNotes: ReadonlyArray<string> | undefined,
+  actorId: string | undefined,
+): BacklogNote[] {
+  const removeSet = new Set((removeNotes ?? []).map((note) => note.trim()).filter((note) => note.length > 0));
+  const retained = (normalizeNotes(existing, new Date().toISOString()) ?? []).filter((note) => !removeSet.has(note.content));
+  return buildNotes(retained, addNotes, actorId, new Date().toISOString());
 }

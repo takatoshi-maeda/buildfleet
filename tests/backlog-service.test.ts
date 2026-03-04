@@ -194,8 +194,10 @@ describe("BacklogService", () => {
     const updatedEpic = await service.updateEpic({ id: epic.id, addNotes: ["epic note 1", "epic note 2"] });
     const updatedItem = await service.updateItem({ id: item.id, addNotes: ["item note 1", "item note 2"] });
 
-    expect(updatedEpic.notes).toEqual(["epic note 1", "epic note 2"]);
-    expect(updatedItem.notes).toEqual(["item note 1", "item note 2"]);
+    expect(updatedEpic.notes?.map((note) => note.content)).toEqual(["epic note 1", "epic note 2"]);
+    expect(updatedItem.notes?.map((note) => note.content)).toEqual(["item note 1", "item note 2"]);
+    expect(updatedEpic.notes?.every((note) => note.id.length > 0 && note.createdAt.length > 0)).toBe(true);
+    expect(updatedItem.notes?.every((note) => note.id.length > 0 && note.createdAt.length > 0)).toBe(true);
 
     const updatedEpicAgain = await service.updateEpic({
       id: epic.id,
@@ -208,8 +210,8 @@ describe("BacklogService", () => {
       removeNotes: ["item note 1"],
     });
 
-    expect(updatedEpicAgain.notes).toEqual(["epic note 2", "epic note 3"]);
-    expect(updatedItemAgain.notes).toEqual(["item note 2", "item note 3"]);
+    expect(updatedEpicAgain.notes?.map((note) => note.content)).toEqual(["epic note 2", "epic note 3"]);
+    expect(updatedItemAgain.notes?.map((note) => note.content)).toEqual(["item note 2", "item note 3"]);
   });
 
   it("supports backlog question add/list/update/answer/delete", async () => {
@@ -275,6 +277,70 @@ describe("BacklogService", () => {
 
     const service = new BacklogService(backlogDir, acceptanceSpecPath, rolesPath);
     expect(await service.listQuestions()).toEqual([]);
+  });
+
+  it("normalizes legacy string notes into note objects", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codefleet-backlog-"));
+    const backlogDir = path.join(tempDir, ".codefleet/data/backlog");
+    const acceptanceSpecPath = path.join(tempDir, ".codefleet/data/acceptance-testing/spec.json");
+    const rolesPath = path.join(tempDir, ".codefleet/roles.json");
+    const backlogItemsPath = path.join(backlogDir, "items.json");
+
+    await fs.mkdir(path.dirname(acceptanceSpecPath), { recursive: true });
+    await fs.writeFile(
+      acceptanceSpecPath,
+      JSON.stringify({ version: 1, updatedAt: "2026-01-01T00:00:00.000Z", tests: [] }, null, 2),
+      "utf8",
+    );
+    await fs.mkdir(path.dirname(rolesPath), { recursive: true });
+    await fs.writeFile(rolesPath, JSON.stringify({ agents: [] }, null, 2), "utf8");
+    await fs.mkdir(path.dirname(backlogItemsPath), { recursive: true });
+    await fs.writeFile(
+      backlogItemsPath,
+      JSON.stringify(
+        {
+          version: 1,
+          updatedAt: "2026-01-01T00:00:00.000Z",
+          epics: [
+            {
+              id: "E-001",
+              title: "legacy epic",
+              status: "todo",
+              visibility: { type: "always-visible", dependsOnEpicIds: [] },
+              acceptanceTestIds: [],
+              notes: ["legacy epic note"],
+              updatedAt: "2026-01-01T00:00:00.000Z",
+            },
+          ],
+          items: [
+            {
+              id: "I-001",
+              epicId: "E-001",
+              title: "legacy item",
+              status: "todo",
+              acceptanceTestIds: [],
+              notes: ["legacy item note"],
+              updatedAt: "2026-01-01T00:00:00.000Z",
+            },
+          ],
+          questions: [],
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+
+    const service = new BacklogService(backlogDir, acceptanceSpecPath, rolesPath);
+    const listed = await service.list();
+    expect(listed.epics[0]?.notes?.[0]).toMatchObject({
+      content: "legacy epic note",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+    expect(listed.items[0]?.notes?.[0]).toMatchObject({
+      content: "legacy item note",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
   });
 
   it("reads item by id and returns ERR_NOT_FOUND for unknown ids", async () => {

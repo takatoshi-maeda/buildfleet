@@ -12,6 +12,13 @@ export type BacklogWorkKind = "product" | "technical";
 
 export type VisibilityType = "always-visible" | "blocked-until-epic-complete";
 
+export interface BacklogNote {
+  id: string;
+  content: string;
+  createdAt: string;
+  createdBy?: string;
+}
+
 export interface VisibilityRule {
   type: VisibilityType;
   dependsOnEpicIds: string[];
@@ -21,7 +28,7 @@ export interface BacklogEpic {
   id: string;
   title: string;
   kind?: BacklogWorkKind;
-  notes?: string[];
+  notes?: BacklogNote[];
   status: BacklogEpicStatus;
   visibility: VisibilityRule;
   acceptanceTestIds: string[];
@@ -33,7 +40,7 @@ export interface BacklogItem {
   epicId: string;
   title: string;
   kind?: BacklogWorkKind;
-  notes?: string[];
+  notes?: BacklogNote[];
   status: BacklogItemStatus;
   acceptanceTestIds: string[];
   updatedAt: string;
