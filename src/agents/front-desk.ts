@@ -8,6 +8,7 @@ import type { ZodType } from "zod";
 import type { BacklogService } from "../domain/backlog/backlog-service.js";
 import { createBacklogAgentTools } from "./tools/backlog-agent-tools.js";
 import { createFeedbackNoteAgentTools } from "./tools/feedback-note-agent-tools.js";
+import type { FeedbackNoteEventPublisher } from "./tools/feedback-note-agent-tools.js";
 
 export interface CodefleetFrontDeskLlmConfig {
   provider: LLMProvider;
@@ -22,6 +23,7 @@ export interface CodefleetFrontDeskRuntimeConfig {
   llm?: Partial<CodefleetFrontDeskLlmConfig>;
   maxTurns?: number;
   feedbackNotesDir?: string;
+  feedbackNoteEventPublisher?: FeedbackNoteEventPublisher;
   fileToolWorkingDir?: string;
   historyBaseDir?: string;
   clientFactory?: (options: LLMClientOptions) => LLMClient;
@@ -30,6 +32,7 @@ export interface CodefleetFrontDeskRuntimeConfig {
 interface ResolvedCodefleetFrontDeskRuntimeConfig {
   maxTurns: number;
   feedbackNotesDir: string;
+  feedbackNoteEventPublisher?: FeedbackNoteEventPublisher;
   fileToolWorkingDir: string;
   historyBaseDir: string;
   llm: CodefleetFrontDeskLlmConfig;
@@ -68,7 +71,11 @@ export function createCodefleetFrontDeskAgent(
   const llmClient = resolvedConfig.clientFactory(toLlmClientOptions(resolvedConfig.llm));
   const tools = [
     ...createBacklogAgentTools(backlogService),
-    ...createFeedbackNoteAgentTools(resolvedConfig.feedbackNotesDir),
+    ...createFeedbackNoteAgentTools({
+      notesDir: resolvedConfig.feedbackNotesDir,
+      projectRootDir: process.cwd(),
+      eventPublisher: resolvedConfig.feedbackNoteEventPublisher,
+    }),
     ...createFrontDeskFileReadTools(resolvedConfig.fileToolWorkingDir),
   ];
 
@@ -104,6 +111,7 @@ export function resolveCodefleetFrontDeskRuntimeConfig(
   return {
     maxTurns,
     feedbackNotesDir: runtimeConfig.feedbackNotesDir ?? DEFAULT_FEEDBACK_NOTES_DIR,
+    feedbackNoteEventPublisher: runtimeConfig.feedbackNoteEventPublisher,
     fileToolWorkingDir: runtimeConfig.fileToolWorkingDir ?? process.cwd(),
     historyBaseDir: runtimeConfig.historyBaseDir ?? DEFAULT_HISTORY_BASE_DIR,
     llm: {

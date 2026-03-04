@@ -6,6 +6,20 @@ import { createUlid } from "../../shared/ulid.js";
 
 const DEFAULT_FEEDBACK_NOTES_DIR = ".codefleet/data/feedback-notes";
 
+export interface FeedbackNoteEventPublishResult {
+  enqueuedAgentIds: string[];
+}
+
+export interface FeedbackNoteEventPublisher {
+  publishFeedbackNoteCreated(path: string): Promise<FeedbackNoteEventPublishResult>;
+}
+
+export interface CreateFeedbackNoteAgentToolsOptions {
+  notesDir?: string;
+  projectRootDir?: string;
+  eventPublisher?: FeedbackNoteEventPublisher;
+}
+
 const FeedbackNoteCreateInputSchema = z.object({
   summary: z.string().trim().min(1).max(500),
   details: z.string().trim().min(1),
@@ -29,7 +43,13 @@ interface FeedbackNoteRecord {
   createdAt: string;
 }
 
-export function createFeedbackNoteAgentTools(notesDir: string = DEFAULT_FEEDBACK_NOTES_DIR): ToolDefinition[] {
+type FeedbackNoteAgentToolsInput = string | CreateFeedbackNoteAgentToolsOptions | undefined;
+
+export function createFeedbackNoteAgentTools(input: FeedbackNoteAgentToolsInput = DEFAULT_FEEDBACK_NOTES_DIR): ToolDefinition[] {
+  const options: CreateFeedbackNoteAgentToolsOptions = typeof input === "string" ? { notesDir: input } : (input ?? {});
+  const notesDir = options.notesDir ?? DEFAULT_FEEDBACK_NOTES_DIR;
+  const projectRootDir = options.projectRootDir ?? process.cwd();
+  const eventPublisher = options.eventPublisher;
   return [
     {
       name: "feedback_note_create",
@@ -52,7 +72,8 @@ export function createFeedbackNoteAgentTools(notesDir: string = DEFAULT_FEEDBACK
         // One-file-per-note keeps append operations simple and avoids coordination
         // hazards when multiple front-desk runs write feedback concurrently.
         await fs.writeFile(notePath, serializeFeedbackNote(record), "utf8");
-        return { note: record, path: notePath };
+        const event = await publishFeedbackNoteCreated(eventPublisher, notePath, projectRootDir);
+        return { note: record, path: notePath, event };
       },
     },
     {
@@ -71,6 +92,57 @@ export function createFeedbackNoteAgentTools(notesDir: string = DEFAULT_FEEDBACK
       },
     },
   ];
+}
+
+async function publishFeedbackNoteCreated(
+  eventPublisher: FeedbackNoteEventPublisher | undefined,
+  notePath: string,
+  projectRootDir: string,
+): Promise<{
+  type: "feedback-note.create";
+  path: string;
+  status: "enqueued" | "failed";
+  enqueuedAgentIds?: string[];
+  error?: string;
+} | null> {
+  if (!eventPublisher) {
+    return null;
+  }
+
+  try {
+    const relativePath = toProjectRelativeMarkdownPath(notePath, projectRootDir);
+    const result = await eventPublisher.publishFeedbackNoteCreated(relativePath);
+    return {
+      type: "feedback-note.create",
+      path: relativePath,
+      status: "enqueued",
+      enqueuedAgentIds: result.enqueuedAgentIds,
+    };
+  } catch (error) {
+    return {
+      type: "feedback-note.create",
+      path: notePath,
+      status: "failed",
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+function toProjectRelativeMarkdownPath(filePath: string, projectRootDir: string): string {
+  const relative = path.relative(projectRootDir, filePath).split(path.sep).join("/");
+  if (relative.length === 0) {
+    throw new Error("feedback note path must be non-empty");
+  }
+  if (relative.includes("..")) {
+    throw new Error("feedback note path must be inside project root");
+  }
+  if (relative.startsWith("/") || /^[a-zA-Z]:[\\/]/u.test(relative)) {
+    throw new Error("feedback note path must be project-root relative");
+  }
+  if (!relative.endsWith(".md")) {
+    throw new Error("feedback note path must end with .md");
+  }
+  return relative;
 }
 
 async function readFeedbackNotes(notesDir: string): Promise<FeedbackNoteRecord[]> {

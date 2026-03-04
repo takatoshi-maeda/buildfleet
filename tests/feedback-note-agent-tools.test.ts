@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createFeedbackNoteAgentTools } from "../src/agents/tools/feedback-note-agent-tools.js";
 
 describe("feedback note agent tools", () => {
@@ -38,5 +38,59 @@ describe("feedback note agent tools", () => {
     expect(listResult.count).toBe(1);
     expect(listResult.notes?.[0]?.summary).toBe("CLI output is hard to read");
     expect(listResult.notes?.[0]?.reporter).toBe("test-user");
+  });
+
+  it("publishes feedback-note.create after creating a note", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codefleet-feedback-notes-"));
+    const publishFeedbackNoteCreated = vi.fn(async () => ({ enqueuedAgentIds: ["orchestrator-1"] }));
+    const tools = createFeedbackNoteAgentTools({
+      notesDir: path.join(tempDir, ".codefleet/data/feedback-notes"),
+      projectRootDir: tempDir,
+      eventPublisher: {
+        publishFeedbackNoteCreated,
+      },
+    });
+    const createTool = tools.find((tool) => tool.name === "feedback_note_create");
+
+    const createResult = (await createTool?.execute?.({
+      summary: "Need better summaries",
+      details: "Front-desk should notify Orchestrator immediately after capture.",
+    })) as {
+      event?: { type: string; path: string; status: string; enqueuedAgentIds?: string[]; error?: string } | null;
+    };
+
+    expect(publishFeedbackNoteCreated).toHaveBeenCalledTimes(1);
+    expect(publishFeedbackNoteCreated.mock.calls[0]?.[0]).toMatch(
+      /^\.codefleet\/data\/feedback-notes\/[0-9A-HJKMNP-TV-Z]{26}\.md$/u,
+    );
+    expect(createResult.event).toEqual({
+      type: "feedback-note.create",
+      path: expect.stringMatching(/^\.codefleet\/data\/feedback-notes\/[0-9A-HJKMNP-TV-Z]{26}\.md$/u),
+      status: "enqueued",
+      enqueuedAgentIds: ["orchestrator-1"],
+    });
+  });
+
+  it("keeps note creation successful even when event publish fails", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codefleet-feedback-notes-"));
+    const tools = createFeedbackNoteAgentTools({
+      notesDir: path.join(tempDir, ".codefleet/data/feedback-notes"),
+      projectRootDir: tempDir,
+      eventPublisher: {
+        publishFeedbackNoteCreated: async () => {
+          throw new Error("queue unavailable");
+        },
+      },
+    });
+    const createTool = tools.find((tool) => tool.name === "feedback_note_create");
+
+    const createResult = (await createTool?.execute?.({
+      summary: "Queue is flaky",
+      details: "Keep the note persisted for retry.",
+    })) as { path?: string; event?: { status: string; error?: string } | null };
+
+    expect(createResult.path?.endsWith(".md")).toBe(true);
+    expect(createResult.event?.status).toBe("failed");
+    expect(createResult.event?.error).toContain("queue unavailable");
   });
 });

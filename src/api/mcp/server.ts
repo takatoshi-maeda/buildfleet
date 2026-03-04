@@ -4,7 +4,9 @@ import { cors } from "hono/cors";
 import { mountMcpRoutes, type AgentMount } from "ai-kit/hono";
 import { BacklogService } from "../../domain/backlog/backlog-service.js";
 import { FleetObservabilityService } from "../../domain/fleet/fleet-observability-service.js";
+import { AgentEventQueueService } from "../../domain/events/agent-event-queue-service.js";
 import { createCodefleetFrontDeskAgent, type CodefleetFrontDeskRuntimeConfig } from "../../agents/front-desk.js";
+import type { FeedbackNoteEventPublisher } from "../../agents/tools/feedback-note-agent-tools.js";
 import { registerBacklogMcpTools } from "./tools/backlog-tools.js";
 import { registerFleetObservabilityTools } from "./tools/fleet-observability-tools.js";
 import { JsonlMcpToolAuditLogger } from "./tools/mcp-tool-audit-log.js";
@@ -44,7 +46,13 @@ export async function buildMcpServer(options: McpApiServerOptions = {}): Promise
   app.use("/api/mcp/*", cors({ origin: resolveMcpCorsOrigin }));
   const backlogService = options.backlogService ?? new BacklogService();
   const observabilityService = options.observabilityService ?? new FleetObservabilityService();
+  const eventQueueService = new AgentEventQueueService();
   const toolAuditLogger = new JsonlMcpToolAuditLogger(options.toolAuditLogPath ?? DEFAULT_TOOL_AUDIT_LOG_PATH);
+  const feedbackNoteEventPublisher = createFeedbackNoteEventPublisher(eventQueueService);
+  const frontDeskRuntimeConfig: CodefleetFrontDeskRuntimeConfig = {
+    ...(options.frontDesk ?? {}),
+    feedbackNoteEventPublisher,
+  };
   const mounts = await mountMcpRoutes(app, {
     basePath: "/api/mcp",
     dataDir: options.dataDir ?? DEFAULT_DATA_DIR,
@@ -52,7 +60,7 @@ export async function buildMcpServer(options: McpApiServerOptions = {}): Promise
       {
         name: FRONT_DESK_AGENT_NAME,
         description: "User-facing support desk for backlog visibility",
-        create: createCodefleetFrontDeskAgent(backlogService, options.frontDesk),
+        create: createCodefleetFrontDeskAgent(backlogService, frontDeskRuntimeConfig),
       },
     ],
   });
@@ -70,6 +78,17 @@ export async function buildMcpServer(options: McpApiServerOptions = {}): Promise
   }
 
   return { app, mounts };
+}
+
+function createFeedbackNoteEventPublisher(
+  queueService: Pick<AgentEventQueueService, "enqueueToRunningAgents">,
+): FeedbackNoteEventPublisher {
+  return {
+    async publishFeedbackNoteCreated(path) {
+      const result = await queueService.enqueueToRunningAgents({ type: "feedback-note.create", path });
+      return { enqueuedAgentIds: result.enqueuedAgentIds };
+    },
+  };
 }
 
 function resolveMcpCorsOrigin(origin: string): string | undefined {
