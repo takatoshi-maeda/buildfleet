@@ -144,6 +144,10 @@ export class BacklogService {
     this.rolesRepository = new JsonRepository<Roles>(rolesPath, SCHEMA_PATHS.roles);
   }
 
+  getBacklogDir(): string {
+    return this.backlogDir;
+  }
+
   async readRequirements(): Promise<string> {
     try {
       return await fs.readFile(this.requirementsPath, "utf8");

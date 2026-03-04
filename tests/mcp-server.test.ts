@@ -102,6 +102,22 @@ describe("McpApiServer", () => {
       const logsTailStreamBody = await logsTailStreamResponse.text();
       expect(logsTailStreamBody).toContain("\"method\":\"fleet.logs.complete\"");
 
+      const backlogWatchStreamResponse = await fetch(
+        `http://127.0.0.1:${port}/api/mcp/codefleet.front-desk/tools/call/backlog.watch`,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            accept: "text/event-stream",
+          },
+          body: JSON.stringify({ arguments: { includeSnapshot: false, maxDurationSec: 1, heartbeatSec: 5 } }),
+        },
+      );
+      expect(backlogWatchStreamResponse.status).toBe(200);
+      expect(backlogWatchStreamResponse.headers.get("content-type")).toContain("text/event-stream");
+      const backlogWatchStreamBody = await backlogWatchStreamResponse.text();
+      expect(backlogWatchStreamBody).toContain("\"method\":\"backlog.complete\"");
+
       const notFound = await callTool(port, "backlog.item.get", { id: "I-404" });
       expect(notFound.result?.isError).toBe(true);
       expect(notFound.result?.structuredContent?.error?.code).toBe("ERR_NOT_FOUND");

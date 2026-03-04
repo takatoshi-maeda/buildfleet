@@ -1,5 +1,9 @@
 import { z } from "zod";
 import type { BacklogService } from "../../domain/backlog/backlog-service.js";
+import {
+  BacklogObservabilityService,
+  type BacklogWatchEvent,
+} from "../../domain/backlog/backlog-observability-service.js";
 import { CodefleetError, type ErrorCode } from "../../shared/errors.js";
 import { normalizeToolArgs } from "./tool-args.js";
 
@@ -52,11 +56,24 @@ export const BacklogItemGetMcpInputSchema = z.object({
   id: z.string().optional(),
 });
 
+export const BacklogWatchInputSchema = z.object({
+  includeSnapshot: z.boolean().optional(),
+  heartbeatSec: z.number().int().min(5).max(60).optional(),
+  maxDurationSec: z.number().int().min(1).max(1800).optional(),
+  notificationToken: z.string().min(1).optional(),
+});
+
 export type BacklogToolName =
   | "backlog.epic.list"
   | "backlog.epic.get"
   | "backlog.item.list"
-  | "backlog.item.get";
+  | "backlog.item.get"
+  | "backlog.watch";
+
+export interface ExecuteBacklogToolOptions {
+  onWatchEvent?: (event: BacklogWatchEvent) => Promise<void>;
+  signal?: AbortSignal;
+}
 
 export interface BacklogToolSuccess {
   isError: false;
@@ -82,7 +99,11 @@ export interface BacklogToolDefinition {
   // required-field errors to shared validation/error normalization below.
   mcpInputSchema: Record<string, z.ZodTypeAny>;
   parameters: z.ZodTypeAny;
-  run: (service: BacklogService, rawArgs: unknown) => Promise<Record<string, unknown>>;
+  run: (
+    service: BacklogService,
+    rawArgs: unknown,
+    options: ExecuteBacklogToolOptions,
+  ) => Promise<Record<string, unknown>>;
 }
 
 const BACKLOG_TOOL_DEFINITIONS: BacklogToolDefinition[] = [
@@ -136,6 +157,14 @@ const BACKLOG_TOOL_DEFINITIONS: BacklogToolDefinition[] = [
       return { item: await service.readItem(input) };
     },
   },
+  {
+    name: "backlog.watch",
+    description: "Watch backlog changes and emit MCP notifications",
+    mcpInputSchema: BacklogWatchInputSchema.shape,
+    parameters: BacklogWatchInputSchema,
+    run: async (service, rawArgs, options) =>
+      executeBacklogWatchTool(service, rawArgs, options.onWatchEvent, options.signal),
+  },
 ];
 
 const TOOL_DEFINITION_MAP = new Map<BacklogToolName, BacklogToolDefinition>(
@@ -158,14 +187,39 @@ export async function executeBacklogTool(
   service: BacklogService,
   toolName: BacklogToolName,
   args: unknown,
+  options: ExecuteBacklogToolOptions = {},
 ): Promise<BacklogToolResult> {
   const definition = getBacklogToolDefinition(toolName);
   try {
-    const payload = await definition.run(service, args);
+    const payload = await definition.run(service, args, options);
     return { isError: false, payload };
   } catch (error) {
     return { isError: true, payload: mapToolError(error) };
   }
+}
+
+export async function executeBacklogWatchTool(
+  service: BacklogService,
+  args: unknown,
+  onEvent?: (event: BacklogWatchEvent) => Promise<void>,
+  signal?: AbortSignal,
+): Promise<Record<string, unknown>> {
+  const input = BacklogWatchInputSchema.parse(normalizeToolArgs(args));
+  const observability = new BacklogObservabilityService(service, service.getBacklogDir());
+  const result = await observability.watchBacklog({
+    includeSnapshot: input.includeSnapshot ?? true,
+    heartbeatSec: input.heartbeatSec ?? 15,
+    maxDurationSec: input.maxDurationSec,
+    notificationToken: input.notificationToken,
+    signal,
+    onEvent,
+  });
+  return {
+    startedAt: result.startedAt,
+    endedAt: result.endedAt,
+    eventCount: result.eventCount,
+    reason: result.reason,
+  };
 }
 
 function mapToolError(error: unknown): BacklogToolFailure["payload"] {
@@ -196,3 +250,4 @@ function mapToolError(error: unknown): BacklogToolFailure["payload"] {
 }
 
 export { normalizeToolArgs };
+export type { BacklogWatchEvent };
