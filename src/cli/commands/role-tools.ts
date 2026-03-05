@@ -149,6 +149,15 @@ export function createOrchestratorToolsCommand(options: RoleToolsCommandOptions 
 
   const item = cmd.command("item").description("Manage backlog items");
   item
+    .command("view")
+    .requiredOption("--id <id>", "Item id")
+    .action(async function handleItemView(this: Command, options: { id: string }) {
+      const global = resolveGlobalOptions(this);
+      const loaded = await service.readItem({ id: options.id });
+      console.log(renderItemViewMarkdown(loaded, global));
+    });
+
+  item
     .command("upsert")
     .description("Create or update an item")
     .option("--id <id>", "Item id (update mode)")
@@ -252,6 +261,15 @@ export function createDeveloperToolsCommand(options: RoleToolsCommandOptions = {
     });
 
   const item = cmd.command("item").description("Manage implementation items");
+  item
+    .command("view")
+    .requiredOption("--id <id>", "Item id")
+    .action(async function handleItemView(this: Command, options: { id: string }) {
+      const global = resolveGlobalOptions(this);
+      const loaded = await service.readItem({ id: options.id });
+      console.log(renderItemViewMarkdown(loaded, global));
+    });
+
   item
     .command("start")
     .requiredOption("--id <id>", "Item id")
@@ -493,6 +511,15 @@ export function createPolisherToolsCommand(options: RoleToolsCommandOptions = {}
 
   const item = cmd.command("item").description("Manage polishing notes");
   item
+    .command("view")
+    .requiredOption("--id <id>", "Item id")
+    .action(async function handleItemView(this: Command, options: { id: string }) {
+      const global = resolveGlobalOptions(this);
+      const loaded = await service.readItem({ id: options.id });
+      console.log(renderItemViewMarkdown(loaded, global));
+    });
+
+  item
     .command("add-note")
     .requiredOption("--id <id>", "Item id")
     .requiredOption("--note <text>", "Polishing rationale")
@@ -538,6 +565,16 @@ export function createReviewerToolsCommand(options: RoleToolsCommandOptions = {}
         service.list({ epicId: options.epic, actorId: global.actorId }),
       ]);
       console.log(renderReviewerContextMarkdown(epic, listed.items, global));
+    });
+
+  const item = cmd.command("item").description("Read review target items");
+  item
+    .command("view")
+    .requiredOption("--id <id>", "Item id")
+    .action(async function handleItemView(this: Command, options: { id: string }) {
+      const global = resolveGlobalOptions(this);
+      const loaded = await service.readItem({ id: options.id });
+      console.log(renderItemViewMarkdown(loaded, global));
     });
 
   const decision = cmd.command("decision").description("Record review decision");
@@ -660,27 +697,19 @@ function renderOrchestratorContextMarkdown(
   questions: BacklogQuestion[],
   global: ResolvedGlobalOptions,
 ): string {
-  const lines = [
-    "# Current Context",
-    "",
-    "## Requirements",
-    requirements.trim().length > 0 ? requirements : "(empty)",
-    "",
-    "## Epics",
-    ...renderEpicList(epics),
-    "",
-    "## Items",
-    ...renderItemList(items),
-    "",
-    "## Open Questions",
-    ...renderQuestionList(questions),
-  ];
-
-  if (global.verbose) {
-    lines.push("", "## Meta", "- actorId: " + (global.actorId ?? "(none)"));
-  }
-
-  return lines.join("\n");
+  return renderJsonOutput(
+    {
+      kind: "current-context",
+      title: "Current Context",
+      data: {
+        requirements,
+        epics,
+        items,
+        openQuestions: questions,
+      },
+    },
+    global,
+  );
 }
 
 function renderDeveloperContextMarkdown(
@@ -689,42 +718,52 @@ function renderDeveloperContextMarkdown(
   items: BacklogItem[],
   global: ResolvedGlobalOptions,
 ): string {
-  const lines = [
-    "# Current Context",
-    "",
-    "## Requirements",
-    requirements.trim().length > 0 ? requirements : "(empty)",
-    "",
-    "## Epic",
-    ...renderEpicList([epic]),
-    "",
-    "## Items",
-    ...renderItemList(items),
-  ];
-
-  if (global.verbose) {
-    lines.push("", "## Meta", "- actorId: " + (global.actorId ?? "(none)"));
-  }
-
-  return lines.join("\n");
+  return renderJsonOutput(
+    {
+      kind: "current-context",
+      title: "Current Context",
+      data: {
+        requirements,
+        epic,
+        items,
+      },
+    },
+    global,
+  );
 }
 
 function renderReviewerContextMarkdown(epic: BacklogEpic, items: BacklogItem[], global: ResolvedGlobalOptions): string {
-  const lines = ["# Current Context", "", "## Epic", ...renderEpicList([epic]), "", "## Items", ...renderItemList(items)];
+  return renderJsonOutput(
+    {
+      kind: "current-context",
+      title: "Current Context",
+      data: { epic, items },
+    },
+    global,
+  );
+}
 
-  if (global.verbose) {
-    lines.push("", "## Meta", "- actorId: " + (global.actorId ?? "(none)"));
-  }
-
-  return lines.join("\n");
+function renderItemViewMarkdown(item: BacklogItem, global: ResolvedGlobalOptions): string {
+  return renderJsonOutput(
+    {
+      kind: "item-view",
+      title: "Item",
+      commandSummary: [`${item.id} (${item.epicId}) | ${item.status} | ${item.title}`],
+      data: { item },
+    },
+    global,
+  );
 }
 
 function renderQuestionsMarkdown(questions: BacklogQuestion[], title: string, global: ResolvedGlobalOptions): string {
-  const lines = [`# ${title}`, "", ...renderQuestionList(questions)];
-  if (global.verbose) {
-    lines.push("", "## Count", `- ${questions.length}`);
-  }
-  return lines.join("\n");
+  return renderJsonOutput(
+    {
+      kind: "question-list",
+      title,
+      data: { count: questions.length, questions },
+    },
+    global,
+  );
 }
 
 function renderAcceptanceTestsMarkdown(
@@ -732,39 +771,14 @@ function renderAcceptanceTestsMarkdown(
   title: string,
   global: ResolvedGlobalOptions,
 ): string {
-  const lines = [`# ${title}`, ""];
-  if (tests.length === 0) {
-    lines.push("(none)");
-  } else {
-    for (const test of tests) {
-      lines.push(`- ${test.id} | ${test.status} | ${test.lastExecutionStatus} | ${test.title}`);
-    }
-  }
-  if (global.verbose) {
-    lines.push("", "## Raw", renderJsonCodeBlock(tests));
-  }
-  return lines.join("\n");
-}
-
-function renderEpicList(epics: ReadonlyArray<BacklogEpic>): string[] {
-  if (epics.length === 0) {
-    return ["(none)"];
-  }
-  return epics.map((epic) => `- ${epic.id} | ${epic.status} | ${epic.title}`);
-}
-
-function renderItemList(items: ReadonlyArray<BacklogItem>): string[] {
-  if (items.length === 0) {
-    return ["(none)"];
-  }
-  return items.map((item) => `- ${item.id} (${item.epicId}) | ${item.status} | ${item.title}`);
-}
-
-function renderQuestionList(questions: ReadonlyArray<BacklogQuestion>): string[] {
-  if (questions.length === 0) {
-    return ["(none)"];
-  }
-  return questions.map((question) => `- ${question.id} | ${question.status} | ${question.title}`);
+  return renderJsonOutput(
+    {
+      kind: "acceptance-test-list",
+      title,
+      data: { count: tests.length, tests },
+    },
+    global,
+  );
 }
 
 function renderMutationMarkdown(input: {
@@ -773,15 +787,44 @@ function renderMutationMarkdown(input: {
   result: unknown;
   verbose: boolean;
 }): string {
-  const lines = [`# ${input.title}`, "", ...input.summary.map((line) => `- ${line}`)];
-  if (input.verbose) {
-    lines.push("", "## Result", renderJsonCodeBlock(input.result));
-  }
-  return lines.join("\n");
+  return renderJsonOutput(
+    {
+      kind: "mutation",
+      title: input.title,
+      commandSummary: input.summary,
+      data: input.result,
+    },
+    { actorId: undefined, verbose: input.verbose },
+  );
 }
 
-function renderJsonCodeBlock(value: unknown): string {
-  return ["```json", JSON.stringify(value, null, 2), "```"].join("\n");
+function renderJsonOutput(
+  payload: {
+    kind: string;
+    title: string;
+    commandSummary?: string[];
+    data: unknown;
+    flattenDataToRoot?: boolean;
+  },
+  global: ResolvedGlobalOptions,
+): string {
+  const { flattenDataToRoot = true, data, ...rest } = payload;
+  const rootData =
+    flattenDataToRoot && typeof data === "object" && data !== null && !Array.isArray(data)
+      ? (data as Record<string, unknown>)
+      : { data };
+  return JSON.stringify(
+    {
+      ...rootData,
+      ...rest,
+      meta: {
+        actorId: global.actorId ?? null,
+        verbose: global.verbose,
+      },
+    },
+    null,
+    2,
+  );
 }
 
 function collectRepeatable(value: string, previous: string[] = []): string[] {
@@ -803,6 +846,7 @@ function buildOrchestratorManual(executableName: string): string {
     "- `current-context view`",
     "- `requirements update --file <path>|--text <text>`",
     "- `epic upsert ...`",
+    "- `item view --id <I-xxx>`",
     "- `item upsert ...`",
     "- `question add ...`",
     "",
@@ -811,6 +855,7 @@ function buildOrchestratorManual(executableName: string): string {
     `${executableName} current-context view`,
     `${executableName} requirements update --file docs/requirements.md`,
     `${executableName} epic upsert --title \"Checkout Revamp\" --kind product --status todo`,
+    `${executableName} item view --id I-104`,
     `${executableName} item upsert --epic E-012 --title \"Add E2E coverage\" --kind technical`,
     `${executableName} question add --title \"Clarify discount edge-case\" --details \"...\"`,
     "```",
@@ -826,6 +871,7 @@ function buildDeveloperManual(executableName: string): string {
     "",
     "## Subcommands",
     "- `current-context view --epic <E-xxx>`",
+    "- `item view --id <I-xxx>`",
     "- `item start --id <I-xxx> [--note <text>]`",
     "- `item note --id <I-xxx> --note <text>`",
     "- `item done --id <I-xxx> [--note <text>]`",
@@ -835,6 +881,7 @@ function buildDeveloperManual(executableName: string): string {
     "## Typical Examples",
     "```bash",
     `${executableName} current-context view --epic E-012`,
+    `${executableName} item view --id I-104`,
     `${executableName} item start --id I-104 --note \"Start Playwright-first flow\"`,
     `${executableName} item done --id I-104 --note \"All tests passed\"`,
     `${executableName} question inbox`,
@@ -873,11 +920,13 @@ function buildPolisherManual(executableName: string): string {
     "",
     "## Subcommands",
     "- `current-context view --epic <E-xxx>`",
+    "- `item view --id <I-xxx>`",
     "- `item add-note --id <I-xxx> --note <text>`",
     "",
     "## Typical Examples",
     "```bash",
     `${executableName} current-context view --epic E-012`,
+    `${executableName} item view --id I-104`,
     `${executableName} item add-note --id I-104 --note \"Simplified CTA hierarchy for readability\"`,
     "```",
   ].join("\n");
@@ -892,12 +941,14 @@ function buildReviewerManual(executableName: string): string {
     "",
     "## Subcommands",
     "- `current-context view --epic <E-xxx>`",
+    "- `item view --id <I-xxx>`",
     "- `decision pass --epic <E-xxx> [--note <text>]`",
     "- `decision changes-requested --epic <E-xxx> --rationale <text>`",
     "",
     "## Typical Examples",
     "```bash",
     `${executableName} current-context view --epic E-012`,
+    `${executableName} item view --id I-104`,
     `${executableName} decision pass --epic E-012 --note \"All checks green\"`,
     `${executableName} decision changes-requested --epic E-012 --rationale \"Repro: ... Expected: ... Cause: ... Fix: ...\"`,
     "```",

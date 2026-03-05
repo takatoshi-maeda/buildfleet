@@ -4,6 +4,7 @@ import { BacklogService } from "../src/domain/backlog/backlog-service.js";
 import { createDeveloperToolsCli } from "../src/cli/codefleet-developer-tools.js";
 import { createGatekeeperToolsCli } from "../src/cli/codefleet-gatekeeper-tools.js";
 import { createOrchestratorToolsCli } from "../src/cli/codefleet-orchestrator-tools.js";
+import { createPolisherToolsCli } from "../src/cli/codefleet-polisher-tools.js";
 import { createReviewerToolsCli } from "../src/cli/codefleet-reviewer-tools.js";
 
 describe("role tools commands", () => {
@@ -21,6 +22,28 @@ describe("role tools commands", () => {
 
     expect(writeSpy).toHaveBeenCalledWith("next requirements");
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("Requirements Updated"));
+  });
+
+  it("orchestrator item view reads and prints item summary", async () => {
+    const readSpy = vi.spyOn(BacklogService.prototype, "readItem").mockResolvedValue({
+      id: "I-104",
+      epicId: "E-012",
+      title: "Implement",
+      kind: "technical",
+      notes: [{ id: "N-001", content: "orchestrator note", createdAt: "2026-03-04T00:00:00.000Z" }],
+      status: "todo",
+      acceptanceTestIds: [],
+      updatedAt: "2026-03-04T00:00:00.000Z",
+    });
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    await createOrchestratorToolsCli().parseAsync(["item", "view", "--id", "I-104"], {
+      from: "user",
+    });
+
+    expect(readSpy).toHaveBeenCalledWith({ id: "I-104" });
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("I-104 (E-012) | todo | Implement"));
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("orchestrator note"));
   });
 
   it("developer item start updates status and note", async () => {
@@ -46,6 +69,28 @@ describe("role tools commands", () => {
         addNotes: ["start"],
       }),
     );
+  });
+
+  it("developer item view reads and prints item summary", async () => {
+    const readSpy = vi.spyOn(BacklogService.prototype, "readItem").mockResolvedValue({
+      id: "I-104",
+      epicId: "E-012",
+      title: "Implement",
+      kind: "technical",
+      notes: [{ id: "N-002", content: "developer note", createdAt: "2026-03-04T00:00:00.000Z" }],
+      status: "todo",
+      acceptanceTestIds: [],
+      updatedAt: "2026-03-04T00:00:00.000Z",
+    });
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    await createDeveloperToolsCli().parseAsync(["item", "view", "--id", "I-104"], {
+      from: "user",
+    });
+
+    expect(readSpy).toHaveBeenCalledWith({ id: "I-104" });
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("I-104 (E-012) | todo | Implement"));
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("developer note"));
   });
 
   it("gatekeeper result save forwards lastExecutionNote and actor", async () => {
@@ -125,6 +170,50 @@ describe("role tools commands", () => {
         status: "changes-requested",
       }),
     );
+  });
+
+  it("polisher item view reads and prints item summary", async () => {
+    const readSpy = vi.spyOn(BacklogService.prototype, "readItem").mockResolvedValue({
+      id: "I-104",
+      epicId: "E-012",
+      title: "Implement",
+      kind: "technical",
+      notes: [{ id: "N-003", content: "polisher note", createdAt: "2026-03-04T00:00:00.000Z" }],
+      status: "todo",
+      acceptanceTestIds: [],
+      updatedAt: "2026-03-04T00:00:00.000Z",
+    });
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    await createPolisherToolsCli().parseAsync(["item", "view", "--id", "I-104"], {
+      from: "user",
+    });
+
+    expect(readSpy).toHaveBeenCalledWith({ id: "I-104" });
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("I-104 (E-012) | todo | Implement"));
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("polisher note"));
+  });
+
+  it("reviewer item view reads and prints item summary", async () => {
+    const readSpy = vi.spyOn(BacklogService.prototype, "readItem").mockResolvedValue({
+      id: "I-104",
+      epicId: "E-012",
+      title: "Implement",
+      kind: "technical",
+      notes: [{ id: "N-004", content: "reviewer note", createdAt: "2026-03-04T00:00:00.000Z" }],
+      status: "todo",
+      acceptanceTestIds: [],
+      updatedAt: "2026-03-04T00:00:00.000Z",
+    });
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    await createReviewerToolsCli().parseAsync(["item", "view", "--id", "I-104"], {
+      from: "user",
+    });
+
+    expect(readSpy).toHaveBeenCalledWith({ id: "I-104" });
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("I-104 (E-012) | todo | Implement"));
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("reviewer note"));
   });
 
   it("prints markdown-oriented manuals via --help", async () => {
