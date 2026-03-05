@@ -24,7 +24,7 @@ describe("local-process-registry", () => {
     await expect(resolveProjectIdFromGitRemote(workspaceDir)).resolves.toBe("workspace-alpha");
   });
 
-  it("discovers only live peer processes with matching projectId", async () => {
+  it("discovers all live peer processes on the same machine", async () => {
     const registryDir = await fs.mkdtemp(path.join(os.tmpdir(), "codefleet-registry-"));
     const registry = new LocalProcessRegistry({
       registryDir,
@@ -89,6 +89,12 @@ describe("local-process-registry", () => {
         projectId: "acme/codefleet",
         host: "127.0.0.1",
         port: 3291,
+      }),
+      expect.objectContaining({
+        pid: 444,
+        projectId: "other/repo",
+        host: "127.0.0.1",
+        port: 3293,
       }),
     ]);
 

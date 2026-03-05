@@ -1,6 +1,7 @@
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
+import type { AddressInfo } from "node:net";
 import type { Socket } from "node:net";
 import { mountMcpRoutes, type AgentMount } from "ai-kit/hono";
 import { BacklogService } from "../../domain/backlog/backlog-service.js";
@@ -36,6 +37,7 @@ export interface McpApiServerStatus {
 export interface McpApiServerOptions {
   host?: string;
   port?: number;
+  autoSelectPortOnConflict?: boolean;
   dataDir?: string;
   toolAuditLogPath?: string;
   registryDir?: string;
@@ -58,14 +60,18 @@ export async function buildMcpServer(options: McpApiServerOptions = {}): Promise
   const projectIdPromise = resolveProjectIdFromGitRemote(process.cwd());
 
   app.get("/api/codefleet/endpoints", async (c) => {
+    const requestUrl = new URL(c.req.url);
+    const resolvedHost = requestUrl.hostname || host;
+    const requestPort = Number(requestUrl.port);
+    const resolvedPort = Number.isInteger(requestPort) && requestPort > 0 ? requestPort : port;
     const [projectId, peers] = await Promise.all([projectIdPromise, processRegistry.discover()]);
     const payload = {
       projectId,
       self: {
         pid: process.pid,
-        host,
-        port,
-        endpoint: `http://${host}:${port}`,
+        host: resolvedHost,
+        port: resolvedPort,
+        endpoint: `http://${resolvedHost}:${resolvedPort}`,
       },
       peers: peers.map((peer) => ({
         instanceId: peer.instanceId,
@@ -143,7 +149,9 @@ export class McpApiServer {
   private readonly activeSockets = new Set<Socket>();
   private detachConnectionTracking: (() => void) | null = null;
   private readonly host: string;
-  private readonly port: number;
+  private readonly preferredPort: number;
+  private boundPort: number | null = null;
+  private readonly autoSelectPortOnConflict: boolean;
   private readonly dataDir: string;
   private readonly toolAuditLogPath: string;
   private readonly registryDir?: string;
@@ -153,7 +161,8 @@ export class McpApiServer {
 
   constructor(options: McpApiServerOptions = {}) {
     this.host = options.host ?? DEFAULT_HOST;
-    this.port = options.port ?? DEFAULT_PORT;
+    this.preferredPort = options.port ?? DEFAULT_PORT;
+    this.autoSelectPortOnConflict = options.autoSelectPortOnConflict ?? true;
     this.dataDir = options.dataDir ?? DEFAULT_DATA_DIR;
     this.toolAuditLogPath = options.toolAuditLogPath ?? DEFAULT_TOOL_AUDIT_LOG_PATH;
     this.registryDir = options.registryDir;
@@ -171,30 +180,37 @@ export class McpApiServer {
       dataDir: this.dataDir,
       toolAuditLogPath: this.toolAuditLogPath,
       host: this.host,
-      port: this.port,
+      port: this.preferredPort,
       registryDir: this.registryDir,
       backlogService: this.backlogService,
       observabilityService: this.observabilityService,
       frontDesk: this.frontDesk,
     });
     try {
-      await new Promise<void>((resolve, reject) => {
-        const created = serve(
-          {
-            fetch: app.fetch,
-            hostname: this.host,
-            port: this.port,
-          },
-          () => resolve(),
-        );
-        created.once("error", reject);
-        this.detachConnectionTracking = trackServerConnections(created, this.activeSockets);
-        this.server = created;
-      });
+      const started = await this.startListening(app, this.preferredPort);
+      this.server = started.server;
+      this.boundPort = started.port;
+      this.detachConnectionTracking = trackServerConnections(started.server, this.activeSockets);
     } catch (error) {
-      this.server = null;
-      const message = error instanceof Error ? error.message : String(error);
-      throw new Error(`failed to start MCP API server on ${this.host}:${this.port}: ${message}`);
+      const shouldRetryWithEphemeralPort =
+        this.autoSelectPortOnConflict && this.preferredPort !== 0 && isAddressInUseError(error);
+      if (!shouldRetryWithEphemeralPort) {
+        this.server = null;
+        this.boundPort = null;
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`failed to start MCP API server on ${this.host}:${this.preferredPort}: ${message}`);
+      }
+      try {
+        const started = await this.startListening(app, 0);
+        this.server = started.server;
+        this.boundPort = started.port;
+        this.detachConnectionTracking = trackServerConnections(started.server, this.activeSockets);
+      } catch (fallbackError) {
+        this.server = null;
+        this.boundPort = null;
+        const message = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
+        throw new Error(`failed to start MCP API server on ${this.host}:${this.preferredPort}: ${message}`);
+      }
     }
     this.startedAt = new Date().toISOString();
     return this.status();
@@ -211,6 +227,7 @@ export class McpApiServer {
     this.detachConnectionTracking = null;
     this.activeSockets.clear();
     this.server = null;
+    this.boundPort = null;
     this.startedAt = null;
   }
 
@@ -218,9 +235,26 @@ export class McpApiServer {
     return {
       state: this.server ? "running" : "stopped",
       host: this.host,
-      port: this.port,
+      port: this.boundPort ?? this.preferredPort,
       startedAt: this.startedAt,
     };
+  }
+
+  private async startListening(app: Hono, port: number): Promise<{ server: ReturnType<typeof serve>; port: number }> {
+    return await new Promise<{ server: ReturnType<typeof serve>; port: number }>((resolve, reject) => {
+      const created = serve(
+        {
+          fetch: app.fetch,
+          hostname: this.host,
+          port,
+        },
+        () => {
+          const boundPort = resolveServerBoundPort(created, port);
+          resolve({ server: created, port: boundPort });
+        },
+      );
+      created.once("error", reject);
+    });
   }
 }
 
@@ -241,6 +275,26 @@ function trackServerConnections(server: ReturnType<typeof serve>, sockets: Set<S
   return () => {
     server.off("connection", onConnection);
   };
+}
+
+function resolveServerBoundPort(server: ReturnType<typeof serve>, fallbackPort: number): number {
+  const address = server.address();
+  if (address && typeof address !== "string") {
+    return (address as AddressInfo).port;
+  }
+  return fallbackPort;
+}
+
+function isAddressInUseError(error: unknown): boolean {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+  const code = (error as { code?: unknown }).code;
+  if (code === "EADDRINUSE") {
+    return true;
+  }
+  const message = (error as { message?: unknown }).message;
+  return typeof message === "string" && message.includes("EADDRINUSE");
 }
 
 async function closeServerWithActiveConnectionTermination(

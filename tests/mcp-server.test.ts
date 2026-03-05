@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -36,6 +37,41 @@ describe("McpApiServer", () => {
       expect(corsResponse.headers.get("access-control-allow-origin")).toBe("http://localhost:8081");
     } finally {
       await server.stop();
+    }
+  });
+
+  it("falls back to an available port when the requested port is already in use", async () => {
+    const occupiedPort = 43500 + Math.floor(Math.random() * 200);
+    const primary = new McpApiServer({
+      host: "127.0.0.1",
+      port: occupiedPort,
+      dataDir: `.codefleet/runtime/mcp-test-primary-${Date.now().toString(16)}`,
+      frontDesk: createFrontDeskMockConfig(),
+    });
+    const secondary = new McpApiServer({
+      host: "127.0.0.1",
+      port: occupiedPort,
+      dataDir: `.codefleet/runtime/mcp-test-secondary-${Date.now().toString(16)}`,
+      frontDesk: createFrontDeskMockConfig(),
+    });
+
+    try {
+      const primaryStatus = await primary.start();
+      expect(primaryStatus.port).toBe(occupiedPort);
+
+      const secondaryStatus = await secondary.start();
+      expect(secondaryStatus.state).toBe("running");
+      expect(secondaryStatus.port).not.toBe(occupiedPort);
+
+      const endpointsResponse = await fetch(`http://127.0.0.1:${secondaryStatus.port}/api/codefleet/endpoints`);
+      expect(endpointsResponse.status).toBe(200);
+      const endpointsJson = (await endpointsResponse.json()) as {
+        self?: { port?: number };
+      };
+      expect(endpointsJson.self?.port).toBe(secondaryStatus.port);
+    } finally {
+      await secondary.stop();
+      await primary.stop();
     }
   });
 
@@ -242,13 +278,22 @@ describe("McpApiServer", () => {
     }
   });
 
-  it("returns project-scoped peer endpoints from local registry API", async () => {
+  it("returns same-machine peer endpoints from local registry API", async () => {
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codefleet-mcp-endpoints-"));
     const registryDir = path.join(tempDir, "registry");
     await fs.mkdir(registryDir, { recursive: true });
     const projectId = await resolveProjectIdFromGitRemote(process.cwd());
     const now = new Date().toISOString();
     const staleHeartbeat = new Date(Date.now() - 120_000).toISOString();
+    const livePeerProcess = spawn(process.execPath, ["-e", "setInterval(() => {}, 10_000)"], {
+      stdio: "ignore",
+      detached: true,
+    });
+    const livePeerPid = livePeerProcess.pid;
+    if (!livePeerPid) {
+      throw new Error("failed to spawn live peer process for endpoint discovery test");
+    }
+    livePeerProcess.unref();
     await fs.writeFile(
       path.join(registryDir, "1.json"),
       JSON.stringify({
@@ -279,7 +324,7 @@ describe("McpApiServer", () => {
       path.join(registryDir, "2.json"),
       JSON.stringify({
         instanceId: "cf-peer-other-project",
-        pid: 2,
+        pid: livePeerPid,
         projectId: "other/repo",
         host: "127.0.0.1",
         port: 3393,
@@ -325,9 +370,26 @@ describe("McpApiServer", () => {
           startedAt: now,
           lastHeartbeat: now,
         },
+        {
+          instanceId: "cf-peer-other-project",
+          pid: livePeerPid,
+          host: "127.0.0.1",
+          port: 3393,
+          endpoint: "http://127.0.0.1:3393",
+          startedAt: now,
+          lastHeartbeat: now,
+        },
       ]);
     } finally {
       await server.stop();
+      try {
+        process.kill(livePeerPid, "SIGTERM");
+      } catch (error) {
+        const err = error as NodeJS.ErrnoException;
+        if (err.code !== "ESRCH") {
+          throw error;
+        }
+      }
     }
   });
 

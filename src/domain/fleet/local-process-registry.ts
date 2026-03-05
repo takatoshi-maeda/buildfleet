@@ -82,7 +82,6 @@ export class LocalProcessRegistry {
   }
 
   async discover(): Promise<LocalProcessRegistryEntry[]> {
-    const projectId = this.currentEntry?.projectId ?? (await this.resolveProjectIdFn());
     let entries: string[] = [];
     try {
       entries = await fs.readdir(this.registryDir);
@@ -110,9 +109,8 @@ export class LocalProcessRegistry {
         await safeRemove(filePath);
         continue;
       }
-      // Discovery is project-scoped to prevent unrelated workspaces on the same
-      // machine from being treated as a single fleet cluster.
-      if (parsed.projectId !== projectId || parsed.pid === this.processId) {
+      // Keep own process out of peers to avoid self-looping endpoint discovery.
+      if (parsed.pid === this.processId) {
         continue;
       }
       discovered.push(parsed);
