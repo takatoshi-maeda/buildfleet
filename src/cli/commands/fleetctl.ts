@@ -1597,6 +1597,7 @@ async function spawnDetachedAgentRuntimeManagerProcess(input: {
   playwrightPort: number;
 }): Promise<number | null> {
   const args = [
+    ...process.execArgv,
     process.argv[1],
     "up",
     "--gatekeepers",

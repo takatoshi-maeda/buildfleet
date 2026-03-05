@@ -2,6 +2,7 @@
 import { createFleetctlCommand } from "./commands/fleetctl.js";
 import { createInitCommand } from "./commands/init.js";
 import { createTriggerCommand } from "./commands/trigger.js";
+import { createSupervisorCommand } from "./commands/supervisor.js";
 
 export function createCodefleetCli() {
   const program = createFleetctlCommand({ commandName: "codefleet" });
@@ -12,6 +13,7 @@ export function createCodefleetCli() {
 
   program.addCommand(createInitCommand());
   program.addCommand(createTriggerCommand());
+  program.addCommand(createSupervisorCommand());
 
   return program;
 }

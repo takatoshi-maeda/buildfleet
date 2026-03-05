@@ -44,6 +44,7 @@ describe("CLI command layout", () => {
     expect(output).toContain("logs");
     expect(output).toContain("init");
     expect(output).toContain("trigger");
+    expect(output).toContain("supervisor");
     expect(output).not.toContain("acceptance-test");
     expect(output).not.toContain("backlog");
   });
