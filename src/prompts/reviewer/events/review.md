@@ -24,6 +24,13 @@ Testing policy for review (must follow all):
   - Include any created/updated review scripts in commit history as part of the review work.
   - Keep execution artifacts (logs, JSON output, screenshots) in `tmp/logs/review/` and do not treat those artifacts as script sources.
 
+Commit and exit policy (must follow all):
+- Do not finish the review run with uncommitted changes.
+- Before final output, create a commit that contains all review deliverables generated in this run (e.g., review scripts under `tests/review/`, and any related tracked files intentionally produced for review).
+- Do not include execution artifacts under `tmp/logs/review/` in the commit.
+- If there are no tracked file changes to commit, explicitly state in the output that no commit was necessary.
+- After creating the commit (or confirming no commit was necessary), proceed to the decision action and final output.
+
 Decision actions (must execute one path):
 - Pass:
   - `codefleet-backlog epic update --id {{epicId}} --status done`
