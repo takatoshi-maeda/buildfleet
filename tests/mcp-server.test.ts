@@ -6,6 +6,7 @@ import type { LLMClient, LLMChatInput, LLMMessage } from "ai-kit";
 import { BacklogService } from "../src/domain/backlog/backlog-service.js";
 import type { CodefleetFrontDeskRuntimeConfig } from "../src/agents/front-desk.js";
 import { McpApiServer } from "../src/api/mcp/server.js";
+import { resolveProjectIdFromGitRemote } from "../src/domain/fleet/local-process-registry.js";
 
 describe("McpApiServer", () => {
   it("exposes codefleet.front-desk in /api/mcp and reports ready status", async () => {
@@ -238,6 +239,95 @@ describe("McpApiServer", () => {
       ).resolves.toBeUndefined();
     } finally {
       await streamResponse.body?.cancel();
+    }
+  });
+
+  it("returns project-scoped peer endpoints from local registry API", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codefleet-mcp-endpoints-"));
+    const registryDir = path.join(tempDir, "registry");
+    await fs.mkdir(registryDir, { recursive: true });
+    const projectId = await resolveProjectIdFromGitRemote(process.cwd());
+    const now = new Date().toISOString();
+    const staleHeartbeat = new Date(Date.now() - 120_000).toISOString();
+    await fs.writeFile(
+      path.join(registryDir, "1.json"),
+      JSON.stringify({
+        instanceId: "cf-peer-live",
+        pid: 1,
+        projectId,
+        host: "127.0.0.1",
+        port: 3391,
+        startedAt: now,
+        lastHeartbeat: now,
+      }),
+      "utf8",
+    );
+    await fs.writeFile(
+      path.join(registryDir, "99999.json"),
+      JSON.stringify({
+        instanceId: "cf-peer-stale",
+        pid: 99999,
+        projectId,
+        host: "127.0.0.1",
+        port: 3392,
+        startedAt: now,
+        lastHeartbeat: staleHeartbeat,
+      }),
+      "utf8",
+    );
+    await fs.writeFile(
+      path.join(registryDir, "2.json"),
+      JSON.stringify({
+        instanceId: "cf-peer-other-project",
+        pid: 2,
+        projectId: "other/repo",
+        host: "127.0.0.1",
+        port: 3393,
+        startedAt: now,
+        lastHeartbeat: now,
+      }),
+      "utf8",
+    );
+
+    const port = 40600 + Math.floor(Math.random() * 1000);
+    const server = new McpApiServer({
+      host: "127.0.0.1",
+      port,
+      registryDir,
+      dataDir: path.join(tempDir, ".codefleet/runtime/mcp"),
+      frontDesk: createFrontDeskMockConfig(),
+    });
+
+    try {
+      await server.start();
+      const response = await fetch(`http://127.0.0.1:${port}/api/codefleet/endpoints`);
+      expect(response.status).toBe(200);
+      expect(response.headers.get("cache-control")).toContain("no-store");
+      const json = (await response.json()) as {
+        projectId: string;
+        self?: { host?: string; port?: number; endpoint?: string };
+        peers?: Array<{ instanceId?: string; host?: string; port?: number; endpoint?: string }>;
+      };
+      expect(json.projectId).toBe(projectId);
+      expect(json.self).toEqual({
+        pid: process.pid,
+        host: "127.0.0.1",
+        port,
+        endpoint: `http://127.0.0.1:${port}`,
+      });
+      expect(json.peers).toEqual([
+        {
+          instanceId: "cf-peer-live",
+          pid: 1,
+          host: "127.0.0.1",
+          port: 3391,
+          endpoint: "http://127.0.0.1:3391",
+          startedAt: now,
+          lastHeartbeat: now,
+        },
+      ]);
+    } finally {
+      await server.stop();
     }
   });
 

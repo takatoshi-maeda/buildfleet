@@ -8,6 +8,7 @@ import { FleetObservabilityService } from "../../domain/fleet/fleet-observabilit
 import { AgentEventQueueService } from "../../domain/events/agent-event-queue-service.js";
 import { createCodefleetFrontDeskAgent, type CodefleetFrontDeskRuntimeConfig } from "../../agents/front-desk.js";
 import type { FeedbackNoteEventPublisher } from "../../agents/tools/feedback-note-agent-tools.js";
+import { LocalProcessRegistry, resolveProjectIdFromGitRemote } from "../../domain/fleet/local-process-registry.js";
 import { registerBacklogMcpTools } from "./tools/backlog-tools.js";
 import { registerFleetObservabilityTools } from "./tools/fleet-observability-tools.js";
 import { JsonlMcpToolAuditLogger } from "./tools/mcp-tool-audit-log.js";
@@ -37,6 +38,7 @@ export interface McpApiServerOptions {
   port?: number;
   dataDir?: string;
   toolAuditLogPath?: string;
+  registryDir?: string;
   backlogService?: BacklogService;
   observabilityService?: FleetObservabilityService;
   frontDesk?: CodefleetFrontDeskRuntimeConfig;
@@ -47,6 +49,38 @@ export async function buildMcpServer(options: McpApiServerOptions = {}): Promise
   app.use("/api/mcp", cors({ origin: resolveMcpCorsOrigin }));
   app.use("/api/mcp/*", cors({ origin: resolveMcpCorsOrigin }));
   const dataDir = options.dataDir ?? DEFAULT_DATA_DIR;
+  const host = options.host ?? DEFAULT_HOST;
+  const port = options.port ?? DEFAULT_PORT;
+  const processRegistry = new LocalProcessRegistry({
+    registryDir: options.registryDir,
+    cwd: process.cwd(),
+  });
+  const projectIdPromise = resolveProjectIdFromGitRemote(process.cwd());
+
+  app.get("/api/codefleet/endpoints", async (c) => {
+    const [projectId, peers] = await Promise.all([projectIdPromise, processRegistry.discover()]);
+    const payload = {
+      projectId,
+      self: {
+        pid: process.pid,
+        host,
+        port,
+        endpoint: `http://${host}:${port}`,
+      },
+      peers: peers.map((peer) => ({
+        instanceId: peer.instanceId,
+        pid: peer.pid,
+        host: peer.host,
+        port: peer.port,
+        endpoint: `http://${peer.host}:${peer.port}`,
+        startedAt: peer.startedAt,
+        lastHeartbeat: peer.lastHeartbeat,
+      })),
+      updatedAt: new Date().toISOString(),
+    };
+    c.header("Cache-Control", "no-store");
+    return c.json(payload);
+  });
 
   const backlogService = options.backlogService ?? new BacklogService();
   const observabilityService = options.observabilityService ?? new FleetObservabilityService();
@@ -112,6 +146,7 @@ export class McpApiServer {
   private readonly port: number;
   private readonly dataDir: string;
   private readonly toolAuditLogPath: string;
+  private readonly registryDir?: string;
   private readonly backlogService?: BacklogService;
   private readonly observabilityService?: FleetObservabilityService;
   private readonly frontDesk?: CodefleetFrontDeskRuntimeConfig;
@@ -121,6 +156,7 @@ export class McpApiServer {
     this.port = options.port ?? DEFAULT_PORT;
     this.dataDir = options.dataDir ?? DEFAULT_DATA_DIR;
     this.toolAuditLogPath = options.toolAuditLogPath ?? DEFAULT_TOOL_AUDIT_LOG_PATH;
+    this.registryDir = options.registryDir;
     this.backlogService = options.backlogService;
     this.observabilityService = options.observabilityService;
     this.frontDesk = options.frontDesk;
@@ -134,6 +170,9 @@ export class McpApiServer {
     const { app } = await buildMcpServer({
       dataDir: this.dataDir,
       toolAuditLogPath: this.toolAuditLogPath,
+      host: this.host,
+      port: this.port,
+      registryDir: this.registryDir,
       backlogService: this.backlogService,
       observabilityService: this.observabilityService,
       frontDesk: this.frontDesk,

@@ -62,6 +62,45 @@ interface DockerEnvironmentDependencies {
   readFile: (path: string, encoding: BufferEncoding) => Promise<string>;
 }
 
+interface FleetPeerEndpointRecord {
+  instanceId: string;
+  pid: number;
+  host: string;
+  port: number;
+  endpoint: string;
+  startedAt: string;
+  lastHeartbeat: string;
+}
+
+interface FleetEndpointSnapshot {
+  projectId: string;
+  self: {
+    pid: number;
+    host: string;
+    port: number;
+    endpoint: string;
+  };
+  peers: FleetPeerEndpointRecord[];
+  updatedAt: string;
+}
+
+interface FleetStatusEndpointInput {
+  apiServer?: {
+    state: "running" | "stopped" | "error";
+    host: string;
+    port: number;
+  };
+  discoveredApiServers?: Array<{
+    host: string;
+    port: number;
+  }>;
+}
+
+interface FleetStatusEndpointResolveOptions {
+  fetchFn?: typeof fetch;
+  timeoutMs?: number;
+}
+
 const SUPERVISOR_PID_PATH = path.join(".codefleet", "runtime", "supervisor.pid");
 const PLAYWRIGHT_SERVER_PID_PATH = path.join(".codefleet", "runtime", "playwright-server.pid");
 const DEFAULT_RUNTIME_DIR = path.join(".codefleet", "runtime");
@@ -154,7 +193,9 @@ export function createFleetctlCommand(options: FleetctlCommandOptions = {}): Com
     .option("--role <role>", "Filter by role")
     .action(async (options) => {
       const status = await service.status(options.role as AgentRole | undefined);
-      console.log(JSON.stringify(status, null, 2));
+      const endpointSnapshot = await resolveFleetEndpointsFromApi(status);
+      const output = endpointSnapshot ? { ...status, endpointSnapshot } : status;
+      console.log(JSON.stringify(output, null, 2));
     });
 
   cmd
@@ -511,6 +552,22 @@ export async function isRunningInDockerContainer(deps: DockerEnvironmentDependen
   return false;
 }
 
+export async function resolveFleetEndpointsFromApi(
+  input: FleetStatusEndpointInput,
+  options: FleetStatusEndpointResolveOptions = {},
+): Promise<FleetEndpointSnapshot | null> {
+  const fetchFn = options.fetchFn ?? fetch;
+  const timeoutMs = options.timeoutMs ?? 1_500;
+  const candidates = buildFleetEndpointCandidates(input);
+  for (const candidate of candidates) {
+    const snapshot = await fetchFleetEndpointSnapshot(candidate.host, candidate.port, fetchFn, timeoutMs);
+    if (snapshot) {
+      return snapshot;
+    }
+  }
+  return null;
+}
+
 function validateTargetSelection(all: boolean, role: AgentRole | undefined, commandName: string): void {
   if (all && role) {
     throw new Error(`${commandName}: --all and --role cannot be used together`);
@@ -519,6 +576,118 @@ function validateTargetSelection(all: boolean, role: AgentRole | undefined, comm
   if (!all && !role) {
     throw new Error(`${commandName}: either --all or --role is required`);
   }
+}
+
+function buildFleetEndpointCandidates(input: FleetStatusEndpointInput): Array<{ host: string; port: number }> {
+  const raw: Array<{ host: string; port: number }> = [];
+  if (input.apiServer?.state === "running") {
+    raw.push({ host: input.apiServer.host, port: input.apiServer.port });
+  }
+  for (const discovered of input.discoveredApiServers ?? []) {
+    raw.push({ host: discovered.host, port: discovered.port });
+  }
+  const seen = new Set<string>();
+  const deduped: Array<{ host: string; port: number }> = [];
+  for (const candidate of raw) {
+    const key = `${candidate.host}:${candidate.port}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    deduped.push(candidate);
+  }
+  return deduped;
+}
+
+async function fetchFleetEndpointSnapshot(
+  host: string,
+  port: number,
+  fetchFn: typeof fetch,
+  timeoutMs: number,
+): Promise<FleetEndpointSnapshot | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => {
+    controller.abort();
+  }, timeoutMs);
+  timer.unref();
+  try {
+    const response = await fetchFn(`http://${host}:${port}/api/codefleet/endpoints`, {
+      method: "GET",
+      headers: {
+        accept: "application/json",
+      },
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      return null;
+    }
+    const body = (await response.json()) as unknown;
+    return parseFleetEndpointSnapshot(body);
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function parseFleetEndpointSnapshot(input: unknown): FleetEndpointSnapshot | null {
+  if (!input || typeof input !== "object") {
+    return null;
+  }
+  const payload = input as Record<string, unknown>;
+  const projectId = typeof payload.projectId === "string" ? payload.projectId : null;
+  const updatedAt = typeof payload.updatedAt === "string" ? payload.updatedAt : null;
+  const self = parseFleetEndpointSelf(payload.self);
+  const peers = parseFleetEndpointPeers(payload.peers);
+  if (!projectId || !updatedAt || !self || !peers) {
+    return null;
+  }
+  return {
+    projectId,
+    self,
+    peers,
+    updatedAt,
+  };
+}
+
+function parseFleetEndpointSelf(input: unknown): FleetEndpointSnapshot["self"] | null {
+  if (!input || typeof input !== "object") {
+    return null;
+  }
+  const payload = input as Record<string, unknown>;
+  const pid = typeof payload.pid === "number" ? payload.pid : null;
+  const host = typeof payload.host === "string" ? payload.host : null;
+  const port = typeof payload.port === "number" ? payload.port : null;
+  const endpoint = typeof payload.endpoint === "string" ? payload.endpoint : null;
+  if (pid === null || !host || port === null || !endpoint) {
+    return null;
+  }
+  return { pid, host, port, endpoint };
+}
+
+function parseFleetEndpointPeers(input: unknown): FleetPeerEndpointRecord[] | null {
+  if (!Array.isArray(input)) {
+    return null;
+  }
+  const peers: FleetPeerEndpointRecord[] = [];
+  for (const peer of input) {
+    if (!peer || typeof peer !== "object") {
+      return null;
+    }
+    const payload = peer as Record<string, unknown>;
+    const instanceId = typeof payload.instanceId === "string" ? payload.instanceId : null;
+    const pid = typeof payload.pid === "number" ? payload.pid : null;
+    const host = typeof payload.host === "string" ? payload.host : null;
+    const port = typeof payload.port === "number" ? payload.port : null;
+    const endpoint = typeof payload.endpoint === "string" ? payload.endpoint : null;
+    const startedAt = typeof payload.startedAt === "string" ? payload.startedAt : null;
+    const lastHeartbeat = typeof payload.lastHeartbeat === "string" ? payload.lastHeartbeat : null;
+    if (!instanceId || pid === null || !host || port === null || !endpoint || !startedAt || !lastHeartbeat) {
+      return null;
+    }
+    peers.push({ instanceId, pid, host, port, endpoint, startedAt, lastHeartbeat });
+  }
+  return peers;
 }
 
 function emitAgentRuntimeLog(agent: AgentRuntime, emit: (record: object) => void): void {
