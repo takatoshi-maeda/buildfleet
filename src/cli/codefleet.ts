@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { createFleetctlCommand } from "./commands/fleetctl.js";
 import { createInitCommand } from "./commands/init.js";
+import { createStateCommand } from "./commands/state.js";
 import { createTriggerCommand } from "./commands/trigger.js";
 import { createSupervisorCommand } from "./commands/supervisor.js";
 
@@ -12,6 +13,7 @@ export function createCodefleetCli() {
     .version("0.1.0");
 
   program.addCommand(createInitCommand());
+  program.addCommand(createStateCommand());
   program.addCommand(createTriggerCommand());
   program.addCommand(createSupervisorCommand());
 
