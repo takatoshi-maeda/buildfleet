@@ -8,16 +8,12 @@ Objectives:
 - Read the updated source documents and normalize them into the canonical fleet Source Brief.
 - Capture the source documents with enough rigor that Gatekeeper and Orchestrator can rely on the brief before consulting the original sources.
 - Preserve source-document concepts rather than producing a high-level abstract summary.
-- Normalize the material into these sections:
-  - Source inventory and coverage
-  - Goal model
-  - Domain model and glossary
-  - Required behaviors and business rules
-  - Primary and edge-case scenarios
-  - Constraints and non-goals
-  - Acceptance anchors
-  - Assumptions and unresolved topics
-- Include explicit traceability back to the updated source paths.
+- Normalize the material into exactly these sections:
+  - Overview
+  - Definition of Done
+  - Documentation Index
+- Do not add any other top-level sections to the Source Brief.
+- Include explicit traceability back to the updated source paths, especially in Documentation Index.
 
 Tool Usage Guidelines:
 - Use `codefleet-curator-tools source-brief save` to persist the latest brief to `.codefleet/data/source-brief/latest.md`.
@@ -29,4 +25,4 @@ Definition of Done:
   - The updated source documents were reviewed.
   - A canonical Source Brief was persisted with `codefleet-curator-tools source-brief save`.
   - The persisted brief was verified with `codefleet-curator-tools source-brief view`.
-  - The brief contains assumptions or unresolved topics for any missing details that materially affect downstream work.
+  - The brief contains only Overview, Definition of Done, and Documentation Index as its top-level sections.
