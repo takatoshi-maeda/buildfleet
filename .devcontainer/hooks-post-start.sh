@@ -106,4 +106,6 @@ if command -v safe-chain >/dev/null 2>&1; then
     safe-chain setup --include-python
 fi
 
+sudo apt install python3 python-is-python3
+
 echo "Setup completed."
