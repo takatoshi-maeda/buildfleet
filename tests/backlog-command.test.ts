@@ -81,25 +81,6 @@ describe("backlog command", () => {
     expect(output).toContain("--epic-id <epicId>");
   });
 
-  it("shows requirements subcommands in help", async () => {
-    const command = createBacklogCli();
-    let output = "";
-    command
-      .exitOverride()
-      .configureOutput({
-        writeOut: (str) => {
-          output += str;
-        },
-        writeErr: (str) => {
-          output += str;
-        },
-      });
-
-    await expect(command.parseAsync(["requirements", "--help"], { from: "user" })).rejects.toBeDefined();
-    expect(output).toContain("write");
-    expect(output).toContain("read");
-  });
-
   it("shows update-status-all-todo in top-level help", async () => {
     const command = createBacklogCli();
     let output = "";

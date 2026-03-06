@@ -14,18 +14,6 @@ describe("role tools commands", () => {
     vi.restoreAllMocks();
   });
 
-  it("orchestrator requirements update writes text", async () => {
-    const writeSpy = vi.spyOn(BacklogService.prototype, "writeRequirements").mockResolvedValue("next requirements");
-    const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
-
-    await createOrchestratorToolsCli().parseAsync(["requirements", "update", "--text", "next requirements"], {
-      from: "user",
-    });
-
-    expect(writeSpy).toHaveBeenCalledWith("next requirements");
-    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("Requirements Updated"));
-  });
-
   it("curator source-brief save persists markdown and source paths", async () => {
     const writeSpy = vi.spyOn(SourceBriefService.prototype, "writeLatest").mockResolvedValue({
       version: 1,

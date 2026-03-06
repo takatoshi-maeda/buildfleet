@@ -47,44 +47,15 @@ export function createOrchestratorToolsCommand(options: RoleToolsCommandOptions 
   const currentContext = cmd.command("current-context").description("Read current planning context");
   currentContext
     .command("view")
-    .description("Show requirements, epics, items, and open questions")
+    .description("Show epics, items, and open questions")
     .action(async function handleCurrentContextView(this: Command) {
       const global = resolveGlobalOptions(this);
-      const [requirements, listed, questions] = await Promise.all([
-        service.readRequirements(),
+      const [listed, questions] = await Promise.all([
         service.list({ actorId: global.actorId }),
         service.listQuestions(),
       ]);
       const openQuestions = questions.filter((question) => question.status === "open");
-      console.log(renderOrchestratorContextMarkdown(requirements, listed.epics, listed.items, openQuestions, global));
-    });
-
-  const requirements = cmd.command("requirements").description("Manage requirements document");
-  requirements
-    .command("update")
-    .description("Update requirements from text or file")
-    .option("--file <path>", "Read requirements text from file")
-    .option("--text <text>", "Inline requirements text")
-    .action(async function handleRequirementsUpdate(this: Command, options: { file?: string; text?: string }) {
-      const global = resolveGlobalOptions(this);
-      const hasFile = typeof options.file === "string";
-      const hasText = typeof options.text === "string";
-      if ((hasFile && hasText) || (!hasFile && !hasText)) {
-        throw new Error("requirements update requires exactly one input: --file <path> or --text <text>");
-      }
-
-      const nextText = hasFile ? await fs.readFile(options.file as string, "utf8") : (options.text as string);
-      const updated = await service.writeRequirements(nextText);
-      console.log(
-        renderMutationMarkdown({
-          title: "Requirements Updated",
-          summary: [`Updated requirements (${updated.length} chars).`],
-          result: {
-            source: hasFile ? `file:${options.file}` : "inline-text",
-          },
-          verbose: global.verbose,
-        }),
-      );
+      console.log(renderOrchestratorContextMarkdown(listed.epics, listed.items, openQuestions, global));
     });
 
   const epic = cmd.command("epic").description("Manage epics");
@@ -329,12 +300,11 @@ export function createDeveloperToolsCommand(options: RoleToolsCommandOptions = {
     .requiredOption("--epic <id>", "Epic id")
     .action(async function handleCurrentContextView(this: Command, options: { epic: string }) {
       const global = resolveGlobalOptions(this);
-      const [requirements, epic, listed] = await Promise.all([
-        service.readRequirements(),
+      const [epic, listed] = await Promise.all([
         service.readEpic({ id: options.epic }),
         service.list({ epicId: options.epic, actorId: global.actorId }),
       ]);
-      console.log(renderDeveloperContextMarkdown(requirements, epic, listed.items, global));
+      console.log(renderDeveloperContextMarkdown(epic, listed.items, global));
     });
 
   const item = cmd.command("item").description("Manage implementation items");
@@ -578,12 +548,11 @@ export function createPolisherToolsCommand(options: RoleToolsCommandOptions = {}
     .requiredOption("--epic <id>", "Epic id")
     .action(async function handleCurrentContextView(this: Command, options: { epic: string }) {
       const global = resolveGlobalOptions(this);
-      const [requirements, epic, listed] = await Promise.all([
-        service.readRequirements(),
+      const [epic, listed] = await Promise.all([
         service.readEpic({ id: options.epic }),
         service.list({ epicId: options.epic, actorId: global.actorId }),
       ]);
-      console.log(renderDeveloperContextMarkdown(requirements, epic, listed.items, global));
+      console.log(renderDeveloperContextMarkdown(epic, listed.items, global));
     });
 
   const item = cmd.command("item").description("Manage polishing notes");
@@ -768,7 +737,6 @@ function validateChangesRequestedRationale(rationale: string): void {
 }
 
 function renderOrchestratorContextMarkdown(
-  requirements: string,
   epics: BacklogEpic[],
   items: BacklogItem[],
   questions: BacklogQuestion[],
@@ -779,7 +747,6 @@ function renderOrchestratorContextMarkdown(
       kind: "current-context",
       title: "Current Context",
       data: {
-        requirements,
         epics,
         items,
         openQuestions: questions,
@@ -789,18 +756,12 @@ function renderOrchestratorContextMarkdown(
   );
 }
 
-function renderDeveloperContextMarkdown(
-  requirements: string,
-  epic: BacklogEpic,
-  items: BacklogItem[],
-  global: ResolvedGlobalOptions,
-): string {
+function renderDeveloperContextMarkdown(epic: BacklogEpic, items: BacklogItem[], global: ResolvedGlobalOptions): string {
   return renderJsonOutput(
     {
       kind: "current-context",
       title: "Current Context",
       data: {
-        requirements,
         epic,
         items,
       },
@@ -917,11 +878,10 @@ function buildOrchestratorManual(executableName: string): string {
     "# Orchestrator Tools Manual",
     "",
     "## Purpose",
-    "- Maintain requirements, epics/items, and open questions as a single planning flow.",
+    "- Maintain epics/items and open questions as a single planning flow.",
     "",
     "## Subcommands",
     "- `current-context view`",
-    "- `requirements update --file <path>|--text <text>`",
     "- `epic upsert ...`",
     "- `item view --id <I-xxx>`",
     "- `item upsert ...`",
@@ -930,7 +890,6 @@ function buildOrchestratorManual(executableName: string): string {
     "## Typical Examples",
     "```bash",
     `${executableName} current-context view`,
-    `${executableName} requirements update --file docs/requirements.md`,
     `${executableName} epic upsert --title \"Checkout Revamp\" --kind product --status todo`,
     `${executableName} item view --id I-104`,
     `${executableName} item upsert --epic E-012 --title \"Add E2E coverage\" --kind technical`,

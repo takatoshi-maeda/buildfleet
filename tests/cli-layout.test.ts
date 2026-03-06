@@ -65,7 +65,6 @@ describe("CLI command layout", () => {
     expect(output).toContain("codefleet-backlog [options] [command]");
     expect(output).toContain("epic");
     expect(output).toContain("item");
-    expect(output).toContain("requirements");
     expect(output).toContain("list");
   });
 
@@ -73,7 +72,6 @@ describe("CLI command layout", () => {
     const orchestrator = await renderHelp(createOrchestratorToolsCli());
     expect(orchestrator).toContain("codefleet-orchestrator-tools [options] [command]");
     expect(orchestrator).toContain("current-context");
-    expect(orchestrator).toContain("requirements");
     expect(orchestrator).toContain("epic");
     expect(orchestrator).toContain("item");
 

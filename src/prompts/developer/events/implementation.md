@@ -8,7 +8,7 @@ Objectives:
 Implementation guidance:
 - If anything is unclear, proceed with the best judgment based on explicit assumptions.
 - Record assumptions and decisions by appending notes to the relevant Item.
-- Before implementation, run the following commands to review requirements, Epic, and Items:
+- Before implementation, run the following commands to review the Epic and Items:
   - `codefleet-developer-tools --help`
   - `codefleet-developer-tools current-context view --epic {{epicId}}`
 - Start the development environment first, and keep it running while implementing and validating changes.

@@ -129,7 +129,6 @@ type NormalizedBacklogItems = Omit<BacklogItems, "questions"> & { questions: Bac
 
 export class BacklogService {
   private readonly backlogDir: string;
-  private readonly requirementsPath: string;
   private readonly itemsRepository: JsonRepository<BacklogItems>;
   private readonly acceptanceSpecRepository: JsonRepository<AcceptanceTestingSpec>;
   private readonly rolesRepository: JsonRepository<Roles>;
@@ -140,7 +139,6 @@ export class BacklogService {
     rolesPath: string = DEFAULT_ROLES_PATH,
   ) {
     this.backlogDir = backlogDir;
-    this.requirementsPath = path.join(backlogDir, "requirements.txt");
     this.itemsRepository = new JsonRepository<BacklogItems>(
       path.join(backlogDir, "items.json"),
       SCHEMA_PATHS.backlogItems,
@@ -154,23 +152,6 @@ export class BacklogService {
 
   getBacklogDir(): string {
     return this.backlogDir;
-  }
-
-  async readRequirements(): Promise<string> {
-    try {
-      return await fs.readFile(this.requirementsPath, "utf8");
-    } catch (error) {
-      if (isNodeError(error) && error.code === "ENOENT") {
-        return "";
-      }
-      throw error;
-    }
-  }
-
-  async writeRequirements(text: string): Promise<string> {
-    await fs.mkdir(this.backlogDir, { recursive: true });
-    await fs.writeFile(this.requirementsPath, text, "utf8");
-    return text;
   }
 
   async list(input: ListInput = {}): Promise<BacklogItems> {
@@ -883,10 +864,6 @@ function isVisible(epic: BacklogEpic, epicsById: Map<string, BacklogEpic>): bool
     return true;
   }
   return epic.visibility.dependsOnEpicIds.every((id) => epicsById.get(id)?.status === "done");
-}
-
-function isNodeError(error: unknown): error is NodeJS.ErrnoException {
-  return error instanceof Error;
 }
 
 function normalizeNotes(

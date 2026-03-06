@@ -330,23 +330,6 @@ export function createBacklogCommand(options: BacklogCommandOptions = {}): Comma
       console.log(`deleted question: ${options.id}`);
     });
 
-  const requirements = cmd.command("requirements").description("Manage shared requirements text");
-  requirements
-    .command("write")
-    .requiredOption("--text <text>", "Requirements text")
-    .action(async (options) => {
-      const updated = await service.writeRequirements(options.text);
-      console.log(updated);
-    });
-
-  requirements
-    .command("read")
-    .description("Read shared requirements text")
-    .action(async () => {
-      const text = await service.readRequirements();
-      console.log(text);
-    });
-
   return cmd;
 }
 
