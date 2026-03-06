@@ -1,0 +1,39 @@
+{
+  "name": "@takatoshi-maeda/codefleet-ui",
+  "version": "0.1.0",
+  "private": true,
+  "main": "expo-router/entry",
+  "exports": {
+    ".": "./src/index.ts",
+    "./codefleet": "./codefleet.tsx"
+  },
+  "scripts": {
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "web": "expo start --web"
+  },
+  "peerDependencies": {
+    "@expo/vector-icons": "^15.0.3",
+    "@react-navigation/native": "^7.1.8",
+    "expo": "~54.0.33",
+    "expo-router": "~6.0.23",
+    "expo-status-bar": "~3.0.9",
+    "react": "19.1.0",
+    "react-dom": "19.1.0",
+    "react-native": "0.81.5",
+    "react-native-web": "~0.21.0"
+  },
+  "devDependencies": {
+    "@expo/vector-icons": "^15.0.3",
+    "@react-navigation/native": "^7.1.8",
+    "expo": "~54.0.33",
+    "expo-router": "~6.0.23",
+    "expo-status-bar": "~3.0.9",
+    "react": "19.1.0",
+    "react-dom": "19.1.0",
+    "react-native": "0.81.5",
+    "react-native-web": "~0.21.0",
+    "typescript": "~5.9.2"
+  }
+}

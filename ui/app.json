@@ -1,0 +1,21 @@
+{
+  "expo": {
+    "name": "codefleet-ui",
+    "slug": "codefleet-ui",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "scheme": "codefleet-ui",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "web": {
+      "output": "static"
+    },
+    "plugins": [
+      "expo-router"
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true
+    }
+  }
+}
