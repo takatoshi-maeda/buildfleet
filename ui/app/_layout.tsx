@@ -3,15 +3,31 @@ import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 
-export default function RootLayout() {
-  const colorScheme = useColorScheme();
+import {
+  StandaloneThemePreferenceProvider,
+  useOptionalStandaloneThemePreference,
+} from '../src/theme/StandaloneThemePreference';
+
+function LayoutContent() {
+  const systemColorScheme = useColorScheme();
+  const standaloneTheme = useOptionalStandaloneThemePreference();
+  const resolvedColorScheme =
+    standaloneTheme?.resolvedColorScheme ?? systemColorScheme ?? 'light';
 
   return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+    <ThemeProvider value={resolvedColorScheme === 'dark' ? DarkTheme : DefaultTheme}>
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="index" />
       </Stack>
-      <StatusBar style={colorScheme === 'dark' ? 'light' : 'dark'} />
+      <StatusBar style={resolvedColorScheme === 'dark' ? 'light' : 'dark'} />
     </ThemeProvider>
+  );
+}
+
+export default function RootLayout() {
+  return (
+    <StandaloneThemePreferenceProvider>
+      <LayoutContent />
+    </StandaloneThemePreferenceProvider>
   );
 }

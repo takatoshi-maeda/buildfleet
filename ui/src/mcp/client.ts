@@ -52,6 +52,61 @@ export type FleetStatusResponse = {
   };
 };
 
+export type ConversationSummary = {
+  sessionId: string;
+  title?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  status?: 'idle' | 'progress';
+  turnCount: number;
+  latestUserMessage?: string | null;
+};
+
+export type ConversationsListResult = {
+  sessions: ConversationSummary[];
+};
+
+export type ConversationTurn = {
+  turnId: string;
+  runId: string;
+  timestamp: string;
+  userMessage: string;
+  assistantMessage: string;
+  status: 'success' | 'error' | 'cancelled';
+  errorMessage?: string | null;
+};
+
+export type ConversationInProgress = {
+  runId?: string | null;
+  turnId?: string | null;
+  startedAt?: string | null;
+  updatedAt?: string | null;
+  userMessage?: string | null;
+  assistantMessage?: string | null;
+};
+
+export type ConversationGetResult = {
+  sessionId: string;
+  title?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  agentName?: string | null;
+  status?: 'idle' | 'progress';
+  inProgress?: ConversationInProgress | null;
+  turns: ConversationTurn[];
+};
+
+export type AgentRunResult = {
+  sessionId: string;
+  runId: string;
+  status: 'success' | 'error' | 'cancelled';
+  turnId?: string;
+  responseId?: string;
+  message?: string;
+  notificationToken?: string;
+  errorMessage?: string;
+};
+
 export type CodefleetClient = {
   listBacklogEpics(): Promise<CodefleetEpicListResult>;
   getBacklogEpic(id: string): Promise<CodefleetEpicGetResult>;
@@ -65,6 +120,14 @@ export type CodefleetClient = {
     options?: StreamRequestOptions,
   ): Promise<CodefleetWatchResult>;
   fetchFleetStatus(endpoint: string): Promise<FleetStatusResponse | null>;
+  listConversations(limit?: number): Promise<ConversationsListResult>;
+  getConversation(sessionId: string): Promise<ConversationGetResult>;
+  runAgent(args: {
+    message: string;
+    sessionId?: string | null;
+    signal?: AbortSignal;
+    onStreamEvent?: (message: JsonRpcNotification) => void;
+  }): Promise<AgentRunResult>;
 };
 
 type CreateCodefleetMcpClientOptions = {
@@ -79,6 +142,13 @@ type CreateCodefleetMcpClientOptions = {
 
 const initPromiseByKey = new Map<string, Promise<void>>();
 let requestCounter = 0;
+
+function createNotificationToken(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `token-${Date.now().toString(16)}-${Math.random().toString(16).slice(2)}`;
+}
 
 function nextRequestId(): JsonRpcId {
   requestCounter += 1;
@@ -406,6 +476,56 @@ export function createCodefleetMcpClient(
       const response = await fetch(getEndpoints(endpoint, agentName).status);
       if (!response.ok) return null;
       return (await response.json()) as FleetStatusResponse;
+    },
+    async listConversations(limit = 50) {
+      return callTool<ConversationsListResult>(
+        'conversations.list',
+        { limit },
+        {},
+        buildConfig(),
+        'json',
+      );
+    },
+    async getConversation(sessionId: string) {
+      return callTool<ConversationGetResult>(
+        'conversations.get',
+        { sessionId },
+        {},
+        buildConfig(),
+        'json',
+      );
+    },
+    async runAgent(args) {
+      const notificationToken = createNotificationToken();
+      const payload: Record<string, unknown> = {
+        stream: true,
+        notificationToken,
+        message: args.message,
+      };
+      if (args.sessionId) {
+        payload.sessionId = args.sessionId;
+      }
+
+      return callTool<AgentRunResult>(
+        'agent.run',
+        { arguments: payload },
+        {
+          signal: args.signal,
+          onNotification: (message) => {
+            if (message.method !== 'agent/stream-response') return;
+            const params =
+              message.params && typeof message.params === 'object'
+                ? (message.params as Record<string, unknown>)
+                : null;
+            const token =
+              params?.notificationToken ?? params?.notification_token;
+            if (typeof token === 'string' && token !== notificationToken) return;
+            args.onStreamEvent?.(message);
+          },
+        },
+        buildConfig(),
+        'stream',
+      );
     },
   };
 }

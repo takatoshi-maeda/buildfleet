@@ -4,8 +4,10 @@ import { Stack } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 
 import { Board } from './components/Board';
+import { ThreadPane } from './components/ThreadPane';
 import { useCodefleetBoard } from './hooks/useCodefleetBoard';
 import type { CodefleetClient } from './mcp/client';
+import { useOptionalStandaloneThemePreference } from './theme/StandaloneThemePreference';
 import { useCodefleetColors } from './theme/useCodefleetColors';
 
 const WIDE_BREAKPOINT = 768;
@@ -42,7 +44,9 @@ export default function CodefleetScreen({
   const isWide = width >= WIDE_BREAKPOINT;
   const board = useCodefleetBoard(client, true);
   const colors = useCodefleetColors();
-  const hasSessionPane = Boolean(chrome?.renderSessionPane);
+  const standaloneTheme = useOptionalStandaloneThemePreference();
+  const renderSessionPane = chrome?.renderSessionPane ?? (() => <ThreadPane client={client} />);
+  const hasSessionPane = true;
   const [isSessionOpen, setIsSessionOpen] = useState(false);
   const [isDashboardOpen, setIsDashboardOpen] = useState(false);
   const [hasDashboardUserPreference, setHasDashboardUserPreference] = useState(false);
@@ -166,25 +170,46 @@ export default function CodefleetScreen({
 
   const headerTitle = (
     <View style={styles.headerTitleArea}>
-      <Pressable
-        onPress={() => {
-          if (!canSwitchPeer) return;
-          setIsPeerMenuOpen((value) => !value);
-        }}
-        style={styles.headerTitleTrigger}
-        hitSlop={8}
-      >
-        <Text style={[styles.headerTitle, { color: colors.text }]} numberOfLines={1}>
-          {fleetProjectId}
-        </Text>
-        {canSwitchPeer ? (
-          <Ionicons
-            name={isPeerMenuOpen ? 'chevron-up' : 'chevron-down'}
-            size={16}
-            color={colors.text}
-          />
+      <View style={styles.headerTitleRow}>
+        {standaloneTheme ? (
+          <Pressable
+            onPress={standaloneTheme.cycleThemePreference}
+            hitSlop={8}
+            style={styles.headerThemeButton}
+          >
+            <Ionicons
+              name={
+                standaloneTheme.themePreference === 'light'
+                  ? 'sunny-outline'
+                  : standaloneTheme.themePreference === 'dark'
+                    ? 'moon-outline'
+                    : 'contrast-outline'
+              }
+              size={20}
+              color={colors.tint}
+            />
+          </Pressable>
         ) : null}
-      </Pressable>
+        <Pressable
+          onPress={() => {
+            if (!canSwitchPeer) return;
+            setIsPeerMenuOpen((value) => !value);
+          }}
+          style={styles.headerTitleTrigger}
+          hitSlop={8}
+        >
+          <Text style={[styles.headerTitle, { color: colors.text }]} numberOfLines={1}>
+            {fleetProjectId}
+          </Text>
+          {canSwitchPeer ? (
+            <Ionicons
+              name={isPeerMenuOpen ? 'chevron-up' : 'chevron-down'}
+              size={16}
+              color={colors.text}
+            />
+          ) : null}
+        </Pressable>
+      </View>
       {isPeerMenuOpen ? (
         <View
           style={[
@@ -276,7 +301,7 @@ export default function CodefleetScreen({
                   }}
                 />
               </View>
-              {isSessionMounted && chrome?.renderSessionPane ? (
+              {isSessionMounted ? (
                 <Animated.View
                   style={[
                     styles.sessionContainer,
@@ -296,7 +321,7 @@ export default function CodefleetScreen({
                     },
                   ]}
                 >
-                  {chrome.renderSessionPane()}
+                  {renderSessionPane()}
                 </Animated.View>
               ) : null}
             </View>
@@ -383,10 +408,21 @@ const styles = StyleSheet.create({
     zIndex: 60,
     elevation: 60,
   },
+  headerTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
   headerTitleTrigger: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
+  },
+  headerThemeButton: {
+    width: 28,
+    height: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   headerActions: {
     flexDirection: 'row',
