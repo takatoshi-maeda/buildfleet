@@ -7,6 +7,7 @@ Source documents represented by the brief:
 {{sourcePaths}}
 
 Objectives:
+- First, run `codefleet-gatekeeper-tools agents-md view` to load repository-specific operating guidance from the docsRepository clone.
 - First, run `codefleet-gatekeeper-tools --help` to load role-specific usage guidance.
 - Read `.codefleet/data/source-brief/latest.md` first and use it as the primary source of normalized intent.
 - Use the original source documents only when the brief indicates ambiguity or missing detail.

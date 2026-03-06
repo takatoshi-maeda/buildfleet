@@ -9,6 +9,7 @@ Review perspectives (must evaluate all):
 
 Required workflow:
 - First inspect scope and implementation evidence:
+  - `codefleet-reviewer-tools agents-md view`
   - `codefleet-reviewer-tools --help`
   - `codefleet-reviewer-tools current-context view --epic {{epicId}}`
 - Review repository diffs and test evidence for this Epic.

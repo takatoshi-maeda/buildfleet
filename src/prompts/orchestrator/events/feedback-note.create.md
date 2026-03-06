@@ -18,6 +18,7 @@ Objectives:
 
 Tool Usage Guidelines:
 - Do not directly edit internal codefleet files. Use CLI commands only.
+- Run `codefleet-orchestrator-tools agents-md view` first to load repository-specific operating guidance from the docsRepository clone.
 - First, open and read the feedback note file at `{{event.path}}` to capture the exact user signal and constraints.
 - Explore the repository and collect evidence from both documentation and codebase before finalizing backlog updates.
 - Start by running `codefleet-orchestrator-tools --help` to understand the intended command usage, then choose and execute the necessary commands for exploration, backlog updates, and verification.

@@ -10,19 +10,20 @@ Objectives:
 - Record execution outcomes so `.codefleet/data/acceptance-testing/spec.json` reflects updated `lastExecutionStatus` and `lastExecutionNote`.
 
 Required workflow:
-1. Run `codefleet-gatekeeper-tools --help` first.
-2. Inspect current tests with `codefleet-gatekeeper-tools test-case view` and confirm they trace to document-stated goals.
-3. Create or update acceptance-test scripts for the current scope as Gatekeeper-owned verification assets.
-4. Execute those acceptance-test scripts.
-5. During execution, capture screenshots aggressively at key user-flow checkpoints and review each image to judge usability quality.
-6. Evaluate each test result on both required axes:
+1. Run `codefleet-gatekeeper-tools agents-md view` first.
+2. Run `codefleet-gatekeeper-tools --help`.
+3. Inspect current tests with `codefleet-gatekeeper-tools test-case view` and confirm they trace to document-stated goals.
+4. Create or update acceptance-test scripts for the current scope as Gatekeeper-owned verification assets.
+5. Execute those acceptance-test scripts.
+6. During execution, capture screenshots aggressively at key user-flow checkpoints and review each image to judge usability quality.
+7. Evaluate each test result on both required axes:
    - usability naturalness
    - requirements/spec conformance
-7. Persist results with `codefleet-gatekeeper-tools result save`, and always write a concrete execution summary into `lastExecutionNote` (via `--last-execution-note`).
-8. Do not add backlog Epics or Items and do not write notes to them during this run.
-9. Append notes to the relevant Acceptance Tests when execution uncovers important cautions, referenced documents, defects, risk areas, or follow-up guidance that downstream agents should inherit.
-10. Commit the acceptance-test script changes to git.
-11. Re-run `codefleet-gatekeeper-tools test-case view` to confirm `lastExecutionStatus` is no longer `not-run` for executed tests.
+8. Persist results with `codefleet-gatekeeper-tools result save`, and always write a concrete execution summary into `lastExecutionNote` (via `--last-execution-note`).
+9. Do not add backlog Epics or Items and do not write notes to them during this run.
+10. Append notes to the relevant Acceptance Tests when execution uncovers important cautions, referenced documents, defects, risk areas, or follow-up guidance that downstream agents should inherit.
+11. Commit the acceptance-test script changes to git.
+12. Re-run `codefleet-gatekeeper-tools test-case view` to confirm `lastExecutionStatus` is no longer `not-run` for executed tests.
 
 Output requirements:
 - Report which acceptance tests were executed.

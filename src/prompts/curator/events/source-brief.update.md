@@ -4,6 +4,7 @@ Updated source documents (from docs.update paths):
 {{paths}}
 
 Objectives:
+- First, run `codefleet-curator-tools agents-md view` to load repository-specific operating guidance from the docsRepository clone.
 - First, run `codefleet-curator-tools --help` to load role-specific usage guidance.
 - Read the updated source documents and normalize them into the canonical fleet Source Brief.
 - Capture the source documents with enough rigor that Gatekeeper and Orchestrator can rely on the brief before consulting the original sources.

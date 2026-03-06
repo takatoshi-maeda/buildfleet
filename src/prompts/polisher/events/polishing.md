@@ -4,6 +4,7 @@ Epic ID to polish now: {{epicId}}
 
 Polishing workflow:
 - First inspect requirement context and implementation scope:
+  - `codefleet-polisher-tools agents-md view`
   - `codefleet-polisher-tools --help`
   - `codefleet-polisher-tools current-context view --epic {{epicId}}`
 - Determine whether this Epic contains UI-layer changes.
