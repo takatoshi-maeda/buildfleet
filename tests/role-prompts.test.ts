@@ -17,6 +17,28 @@ describe("role prompts", () => {
 
     expect(eventPrompt).toContain("Implementation Constraints");
     expect(eventPrompt).toContain("normative implementation guidance");
+    expect(eventPrompt).toContain("Acceptance Tests, Epics, and Items");
+    expect(eventPrompt).toContain("downstream agents");
+  });
+
+  it("requires orchestrator and gatekeeper to preserve downstream guidance in notes", async () => {
+    const [orchestratorStartupPrompt, orchestratorEventPrompt, gatekeeperStartupPrompt, gatekeeperRunPrompt] =
+      await Promise.all([
+        getRoleStartupPrompt("Orchestrator"),
+        getRoleEventPromptTemplate("Orchestrator", "backlog.update"),
+        getRoleStartupPrompt("Gatekeeper"),
+        getRoleEventPromptTemplate("Gatekeeper", "acceptance-test.run"),
+      ]);
+
+    expect(orchestratorStartupPrompt).toContain("Acceptance Tests, Epics, and Items");
+    expect(orchestratorStartupPrompt).toContain("downstream agents");
+    expect(orchestratorEventPrompt).toContain("Persist handoff context in notes");
+    expect(orchestratorEventPrompt).toContain("Important downstream guidance was preserved");
+
+    expect(gatekeeperStartupPrompt).toContain("Acceptance Tests, Epics, and Items");
+    expect(gatekeeperStartupPrompt).toContain("downstream agents");
+    expect(gatekeeperRunPrompt).toContain("Append notes to the relevant Acceptance Tests, Epics, and Items");
+    expect(gatekeeperRunPrompt).toContain("preserved in Acceptance Test, Epic, and/or Item notes");
   });
 
   it("requires downstream roles to read the Source Brief before acting", async () => {

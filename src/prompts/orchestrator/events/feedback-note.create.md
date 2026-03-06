@@ -22,6 +22,7 @@ Tool Usage Guidelines:
 - Explore the repository and collect evidence from both documentation and codebase before finalizing backlog updates.
 - Start by running `codefleet-orchestrator-tools --help` to understand the intended command usage, then choose and execute the necessary commands for exploration, backlog updates, and verification.
 - Run `codefleet-orchestrator-tools current-context view` before finalizing backlog updates.
+- Persist handoff context in notes on the relevant Acceptance Tests, Epics, and Items whenever you encounter important operating cautions, referenced documents, assumptions, trade-offs, or follow-up guidance for downstream agents.
 - If important information is missing, continue with best-effort assumptions and speculative Epic/Item creation, and always record unresolved points as questions.
 - Report format is free. Include enough command evidence and rationale to make actions and outcomes verifiable.
 - Never finish with only a planning narrative. Command execution evidence is mandatory.
@@ -39,5 +40,6 @@ Definition of Done (strict):
   - Required backlog questions were added for unresolved ambiguities.
   - Epics were persisted via `codefleet-orchestrator-tools epic upsert`.
   - Items were persisted via `codefleet-orchestrator-tools item upsert`.
+  - Important downstream guidance was preserved in Acceptance Test, Epic, and/or Item notes when relevant context was discovered.
   - Persisted results were verified via `codefleet-orchestrator-tools current-context view`.
 - If any condition is missing, report `NOT DONE` with the missing command/action.
