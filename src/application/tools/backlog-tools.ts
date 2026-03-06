@@ -16,7 +16,6 @@ export const BacklogEpicStatusSchema = z.enum([
   "in-review",
   "changes-requested",
   "done",
-  "blocked",
   "failed",
 ]);
 export const BacklogItemStatusSchema = z.enum([

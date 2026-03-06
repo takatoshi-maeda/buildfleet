@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { BacklogEpicStatusSchema } from "../src/application/tools/backlog-tools.js";
 import { CodefleetError } from "../src/shared/errors.js";
 import { registerBacklogMcpTools } from "../src/api/mcp/tools/backlog-tools.js";
 
@@ -81,5 +82,9 @@ describe("registerBacklogMcpTools", () => {
     registerBacklogMcpTools(mount as never, { list, readEpic, readItem, getBacklogDir: () => ".codefleet/data/backlog" } as never);
 
     expect(tools.some((tool) => tool.name === "backlog.watch")).toBe(false);
+  });
+
+  it("rejects blocked as an epic status", () => {
+    expect(() => BacklogEpicStatusSchema.parse("blocked")).toThrow();
   });
 });

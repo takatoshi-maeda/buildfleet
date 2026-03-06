@@ -2,12 +2,11 @@ import { CodefleetError } from "../../shared/errors.js";
 import type { BacklogEpicStatus, BacklogItemStatus } from "../backlog-items-model.js";
 
 const EPIC_TRANSITIONS: Record<BacklogEpicStatus, BacklogEpicStatus[]> = {
-  todo: ["in-progress", "blocked"],
-  "in-progress": ["in-review", "blocked", "failed"],
-  "in-review": ["done", "changes-requested", "blocked", "failed"],
-  "changes-requested": ["in-progress", "blocked", "failed"],
+  todo: ["in-progress"],
+  "in-progress": ["in-review", "failed"],
+  "in-review": ["done", "changes-requested", "failed"],
+  "changes-requested": ["in-progress", "failed"],
   done: [],
-  blocked: ["todo", "in-progress", "changes-requested"],
   failed: ["todo", "in-progress", "changes-requested"],
 };
 

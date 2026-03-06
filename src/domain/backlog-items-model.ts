@@ -4,7 +4,6 @@ export type BacklogEpicStatus =
   | "in-review"
   | "changes-requested"
   | "done"
-  | "blocked"
   | "failed";
 export type BacklogItemStatus = "todo" | "wait-implementation" | "in-progress" | "done" | "blocked";
 export type BacklogQuestionStatus = "open" | "answered";

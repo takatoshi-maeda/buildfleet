@@ -38,7 +38,7 @@
           },
           "status": {
             "type": "string",
-            "enum": ["todo", "in-progress", "in-review", "changes-requested", "done", "blocked", "failed"]
+            "enum": ["todo", "in-progress", "in-review", "changes-requested", "done", "failed"]
           },
           "visibility": {
             "type": "object",
