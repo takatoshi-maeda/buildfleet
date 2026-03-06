@@ -10,9 +10,12 @@ Objectives:
 - Preserve source-document concepts rather than producing a high-level abstract summary.
 - Normalize the material into exactly these sections:
   - Overview
+  - Implementation Constraints
   - Definition of Done
   - Documentation Index
 - Do not add any other top-level sections to the Source Brief.
+- Write the `Implementation Constraints` section in English.
+- Use `Implementation Constraints` for implementation-facing rules that downstream roles should preserve, such as design-system requirements, mandated component usage, prohibited implementation patterns, technology constraints, and explicitly allowed exceptions.
 - Include explicit traceability back to the updated source paths, especially in Documentation Index.
 
 Tool Usage Guidelines:
@@ -25,4 +28,4 @@ Definition of Done:
   - The updated source documents were reviewed.
   - A canonical Source Brief was persisted with `codefleet-curator-tools source-brief save`.
   - The persisted brief was verified with `codefleet-curator-tools source-brief view`.
-  - The brief contains only Overview, Definition of Done, and Documentation Index as its top-level sections.
+  - The brief contains only Overview, Implementation Constraints, Definition of Done, and Documentation Index as its top-level sections.

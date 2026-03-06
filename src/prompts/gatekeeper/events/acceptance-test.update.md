@@ -11,6 +11,7 @@ Objectives:
 - Read `.codefleet/data/source-brief/latest.md` first and use it as the primary source of normalized intent.
 - Use the original source documents only when the brief indicates ambiguity or missing detail.
 - Derive user/business goals primarily from the Source Brief's `Overview` and completion criteria from its `Definition of Done`.
+- Treat the Source Brief's `Implementation Constraints` as normative implementation guidance when defining completion requirements and acceptance coverage.
 - Define the completion requirements and acceptance requirements needed to achieve those goals.
 - Design acceptance tests that validate goal achievement through product behavior and user-observable outcomes by using `codefleet-gatekeeper-tools` (`test-case view` / `test-case upsert`).
 - Treat test planning as requirements definition and write the plan with that level of rigor.
