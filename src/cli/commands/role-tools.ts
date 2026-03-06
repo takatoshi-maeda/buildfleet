@@ -834,44 +834,38 @@ function renderOrchestratorContextMarkdown(
   epics: BacklogEpic[],
   items: BacklogItem[],
   questions: BacklogQuestion[],
-  global: ResolvedGlobalOptions,
+  _global: ResolvedGlobalOptions,
 ): string {
-  return renderJsonOutput(
+  return JSON.stringify(
     {
-      kind: "current-context",
-      title: "Current Context",
-      data: {
-        epics,
-        items,
-        openQuestions: questions,
-      },
+      epics,
+      items,
+      openQuestions: questions,
     },
-    global,
+    null,
+    2,
   );
 }
 
-function renderDeveloperContextMarkdown(epic: BacklogEpic, items: BacklogItem[], global: ResolvedGlobalOptions): string {
-  return renderJsonOutput(
+function renderDeveloperContextMarkdown(epic: BacklogEpic, items: BacklogItem[], _global: ResolvedGlobalOptions): string {
+  return JSON.stringify(
     {
-      kind: "current-context",
-      title: "Current Context",
-      data: {
-        epic,
-        items,
-      },
+      epic,
+      items,
     },
-    global,
+    null,
+    2,
   );
 }
 
-function renderReviewerContextMarkdown(epic: BacklogEpic, items: BacklogItem[], global: ResolvedGlobalOptions): string {
-  return renderJsonOutput(
+function renderReviewerContextMarkdown(epic: BacklogEpic, items: BacklogItem[], _global: ResolvedGlobalOptions): string {
+  return JSON.stringify(
     {
-      kind: "current-context",
-      title: "Current Context",
-      data: { epic, items },
+      epic,
+      items,
     },
-    global,
+    null,
+    2,
   );
 }
 

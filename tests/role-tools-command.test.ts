@@ -130,6 +130,21 @@ describe("role tools commands", () => {
     );
   });
 
+  it("orchestrator current-context view prints only planning data fields", async () => {
+    vi.spyOn(BacklogService.prototype, "list").mockResolvedValue({
+      epics: [],
+      items: [],
+    });
+    vi.spyOn(BacklogService.prototype, "listQuestions").mockResolvedValue([]);
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    await createOrchestratorToolsCli().parseAsync(["current-context", "view"], {
+      from: "user",
+    });
+
+    expect(logSpy).toHaveBeenCalledWith('{\n  "epics": [],\n  "items": [],\n  "openQuestions": []\n}');
+  });
+
   it("developer item start updates status and note", async () => {
     const updateSpy = vi.spyOn(BacklogService.prototype, "updateItem").mockResolvedValue({
       id: "I-104",
@@ -227,6 +242,45 @@ describe("role tools commands", () => {
     );
   });
 
+  it("developer current-context view prints only implementation data fields", async () => {
+    vi.spyOn(BacklogService.prototype, "readEpic").mockResolvedValue({
+      id: "E-012",
+      title: "Checkout",
+      kind: "product",
+      status: "in-progress",
+      notes: [],
+      visibility: { type: "always-visible", dependsOnEpicIds: [] },
+      acceptanceTestIds: [],
+      updatedAt: "2026-03-04T00:00:00.000Z",
+    });
+    vi.spyOn(BacklogService.prototype, "list").mockResolvedValue({
+      epics: [],
+      items: [],
+    });
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    await createDeveloperToolsCli().parseAsync(["current-context", "view", "--epic", "E-012"], {
+      from: "user",
+    });
+
+    expect(logSpy).toHaveBeenCalledWith(`{
+  "epic": {
+    "id": "E-012",
+    "title": "Checkout",
+    "kind": "product",
+    "status": "in-progress",
+    "notes": [],
+    "visibility": {
+      "type": "always-visible",
+      "dependsOnEpicIds": []
+    },
+    "acceptanceTestIds": [],
+    "updatedAt": "2026-03-04T00:00:00.000Z"
+  },
+  "items": []
+}`);
+  });
+
   it("gatekeeper result save forwards lastExecutionNote and actor", async () => {
     const addResultSpy = vi.spyOn(AcceptanceTestService.prototype, "addResult").mockResolvedValue({
       resultId: "ATR-20260304-001",
@@ -263,6 +317,45 @@ describe("role tools commands", () => {
         executor: "gatekeeper-1",
       }),
     );
+  });
+
+  it("reviewer current-context view prints only review data fields", async () => {
+    vi.spyOn(BacklogService.prototype, "readEpic").mockResolvedValue({
+      id: "E-012",
+      title: "Checkout",
+      kind: "product",
+      status: "done",
+      notes: [],
+      visibility: { type: "always-visible", dependsOnEpicIds: [] },
+      acceptanceTestIds: [],
+      updatedAt: "2026-03-04T00:00:00.000Z",
+    });
+    vi.spyOn(BacklogService.prototype, "list").mockResolvedValue({
+      epics: [],
+      items: [],
+    });
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    await createReviewerToolsCli().parseAsync(["current-context", "view", "--epic", "E-012"], {
+      from: "user",
+    });
+
+    expect(logSpy).toHaveBeenCalledWith(`{
+  "epic": {
+    "id": "E-012",
+    "title": "Checkout",
+    "kind": "product",
+    "status": "done",
+    "notes": [],
+    "visibility": {
+      "type": "always-visible",
+      "dependsOnEpicIds": []
+    },
+    "acceptanceTestIds": [],
+    "updatedAt": "2026-03-04T00:00:00.000Z"
+  },
+  "items": []
+}`);
   });
 
   it("reviewer changes-requested validates rationale shape", async () => {
