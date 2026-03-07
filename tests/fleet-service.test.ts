@@ -4,6 +4,7 @@ import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { FleetService } from "../src/domain/fleet/fleet-service.js";
 import type { FleetApiServerLifecycle, FleetApiServerStatus } from "../src/api/mcp/fleet-api-server-lifecycle.js";
+import type { AgentRuntimeResolver } from "../src/domain/fleet/agent-runtime-resolver.js";
 import type {
   ExecuteRoleAgentInput,
   ExecuteRoleAgentResult,
@@ -163,6 +164,18 @@ class FakeRoleAgentRuntime implements RoleAgentRuntime {
 
   async shutdownAgent(agentId: string): Promise<void> {
     this.shutdowns.push(agentId);
+  }
+}
+
+class FakeAgentRuntimeResolver implements AgentRuntimeResolver {
+  constructor(private readonly runtimes: Map<RoleAgentRuntime["provider"], RoleAgentRuntime>) {}
+
+  resolve(provider: RoleAgentRuntime["provider"]): RoleAgentRuntime {
+    const runtime = this.runtimes.get(provider);
+    if (!runtime) {
+      throw new Error(`missing runtime: ${provider}`);
+    }
+    return runtime;
   }
 }
 
@@ -724,6 +737,80 @@ describe("FleetService", () => {
       await fs.readFile(path.join(runtimeDir, "agent-sessions.json"), "utf8"),
     ) as { sessions: AgentSession[] };
     expect(migratedSessions.sessions[0]?.conversationId).toBe("legacy-thread");
+  });
+
+  it("routes roles to different runtimes when provider config mixes codex and claude", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codefleet-fleet-"));
+    const rolesPath = path.join(tempDir, ".codefleet/roles.json");
+    const runtimeDir = path.join(tempDir, ".codefleet/runtime");
+    const logDir = path.join(tempDir, ".codefleet/logs/agents");
+    const configPath = path.join(tempDir, ".codefleet/config.json");
+    await fs.mkdir(path.dirname(configPath), { recursive: true });
+    await fs.writeFile(
+      configPath,
+      JSON.stringify(
+        {
+          lang: "ja",
+          docsRepository: "https://example.com/spec.git",
+          agentRuntime: {
+            default: {
+              provider: "codex-app-server",
+              config: { model: "gpt-default-codex" },
+            },
+            roles: {
+              Orchestrator: {
+                provider: "claude-agent-sdk",
+                config: { model: "claude-sonnet-4-5", permissionMode: "acceptEdits", persistSession: false },
+              },
+            },
+          },
+          hooks: {},
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+
+    const codexRuntime = new FakeRoleAgentRuntime();
+    const claudeRuntime = new FakeRoleAgentRuntime();
+    Object.defineProperty(claudeRuntime, "provider", {
+      value: "claude-agent-sdk",
+    });
+    const resolver = new FakeAgentRuntimeResolver(
+      new Map([
+        ["codex-app-server", codexRuntime],
+        ["claude-agent-sdk", claudeRuntime],
+      ]),
+    );
+
+    const service = new FleetService(
+      rolesPath,
+      runtimeDir,
+      logDir,
+      new FakeProcessManager() as never,
+      new FakeAppServerClient() as never,
+      undefined,
+      undefined,
+      undefined,
+      resolver,
+    );
+
+    await service.up({ gatekeepers: 0, developers: 0, polishers: 0, reviewers: 0 });
+    expect(claudeRuntime.prepared.map((entry) => entry.agentId)).toEqual(["orchestrator-1"]);
+    expect(codexRuntime.prepared.map((entry) => entry.agentId)).toEqual(["curator-1"]);
+
+    await service.dispatchAgentEvent({
+      agentId: "orchestrator-1",
+      agentRole: "Orchestrator",
+      event: { type: "acceptance-test.update" },
+    });
+    expect(claudeRuntime.executed).toHaveLength(1);
+    expect(codexRuntime.executed).toHaveLength(0);
+
+    const status = await service.status();
+    expect(status.agents.find((agent) => agent.id === "orchestrator-1")?.provider).toBe("claude-agent-sdk");
+    expect(status.sessions.find((session) => session.agentId === "orchestrator-1")?.provider).toBe("claude-agent-sdk");
   });
 
   it("emits acceptance-test.update after gatekeeper handles source-brief.update", async () => {

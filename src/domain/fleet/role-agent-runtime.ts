@@ -1,6 +1,6 @@
 import type { AgentRole } from "../roles-model.js";
 
-export type AgentProviderId = "codex-app-server";
+export type AgentProviderId = "codex-app-server" | "claude-agent-sdk";
 
 export interface RoleAgentRuntimeSessionState {
   conversationId: string | null;
@@ -31,6 +31,7 @@ export interface ExecuteRoleAgentInput {
   cwd: string;
   prompt: string;
   responseLanguage?: string;
+  currentSession?: RoleAgentRuntimeSessionState;
   runtimeConfig: Record<string, unknown>;
 }
 

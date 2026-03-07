@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { AppServerClient } from "../../infra/appserver/app-server-client.js";
+import { ClaudeAgentSdkRuntime } from "../../infra/agent-runtime/claude-agent-sdk-runtime.js";
 import { CodexAppServerRuntime } from "../../infra/agent-runtime/codex-app-server-runtime.js";
 import { JsonRepository } from "../../infra/fs/json-repository.js";
 import { FleetProcessManager } from "../../infra/process/fleet-process-manager.js";
@@ -13,6 +14,7 @@ import type { RoleHookPhase, RoleHooksByAgentRole } from "../hooks-model.js";
 import type { AgentRole } from "../roles-model.js";
 import { SCHEMA_PATHS } from "../schema-paths.js";
 import { ShellHookCommandRunner, type HookCommandRunner } from "../../infra/process/hook-command-runner.js";
+import { StaticAgentRuntimeResolver, type AgentRuntimeResolver } from "./agent-runtime-resolver.js";
 import type { AgentProviderId, RoleAgentRuntime } from "./role-agent-runtime.js";
 import type {
   FleetApiServerLifecycle,
@@ -66,7 +68,7 @@ export class FleetService {
   private threadResponseLanguage?: string;
   private reviewerPlaywrightServerUrl?: string;
   private runtimeConfigByRole = new Map<AgentRole, ResolvedRoleRuntimeConfig>();
-  private readonly agentRuntime: RoleAgentRuntime;
+  private readonly agentRuntimeResolver: AgentRuntimeResolver;
 
   constructor(
     private readonly rolesPath: string = DEFAULT_ROLES_PATH,
@@ -77,14 +79,12 @@ export class FleetService {
     private readonly hooksPath?: string,
     private readonly hookCommandRunner: HookCommandRunner = new ShellHookCommandRunner(),
     private readonly apiServerLifecycle?: FleetApiServerLifecycle,
-    agentRuntime?: RoleAgentRuntime,
+    agentRuntimeResolver?: AgentRuntimeResolver | RoleAgentRuntime,
   ) {
     // Retained for compatibility with existing constructor call sites.
     void this.rolesPath;
     void this.hooksPath;
-    // Keep the old constructor contract working while Phase 1 moves FleetService
-    // to a higher-level runtime abstraction.
-    this.agentRuntime = agentRuntime ?? new CodexAppServerRuntime(this.appServerClient);
+    this.agentRuntimeResolver = normalizeAgentRuntimeResolver(agentRuntimeResolver, this.appServerClient);
     this.runtimeRepository = new JsonRepository<AgentRuntimeCollection>(
       path.join(runtimeDir, "agents.json"),
       SCHEMA_PATHS.agentRuntime,
@@ -150,6 +150,7 @@ export class FleetService {
 
     for (const target of targets) {
       const roleRuntime = this.requireConfiguredRuntime(target.role);
+      const agentRuntime = this.agentRuntimeResolver.resolve(roleRuntime.provider);
       const runtimeAgent = upsertRuntime(runtime, {
         id: target.id,
         role: target.role,
@@ -171,7 +172,7 @@ export class FleetService {
 
       try {
         const startupPrompt = await getRoleStartupPrompt(target.role);
-        const prepared = await this.agentRuntime.prepareAgent({
+        const prepared = await agentRuntime.prepareAgent({
           agentId: target.id,
           role: target.role,
           cwd: process.cwd(),
@@ -233,6 +234,7 @@ export class FleetService {
       const runningRuntime = runtime.agents.find((agent) => agent.id === target.id);
       const pidToStop = runningRuntime?.pid ?? null;
       const roleRuntime = this.requireConfiguredRuntime(target.role);
+      const agentRuntime = this.agentRuntimeResolver.resolve(roleRuntime.provider);
 
       const runtimeAgent = upsertRuntime(runtime, {
         id: target.id,
@@ -247,7 +249,7 @@ export class FleetService {
 
       // Runtime shutdown releases provider-specific resources before the
       // process manager attempts to stop any local child process.
-      await this.agentRuntime.shutdownAgent(target.id);
+      await agentRuntime.shutdownAgent(target.id);
       await this.processManager.stop(pidToStop);
       runtimeAgent.status = "stopped";
       runtimeAgent.pid = null;
@@ -324,6 +326,7 @@ export class FleetService {
 
       const sessions = await this.getOrInitializeSessions();
       const roleRuntime = this.requireConfiguredRuntime(input.agentRole);
+      const agentRuntime = this.agentRuntimeResolver.resolve(roleRuntime.provider);
       const session = upsertSession(sessions, {
         agentId: input.agentId,
         provider: roleRuntime.provider,
@@ -335,12 +338,19 @@ export class FleetService {
       });
 
       const prompt = await this.buildEventPrompt(input.agentRole, input.event);
-      const execution = await this.agentRuntime.execute({
+      const execution = await agentRuntime.execute({
         agentId: input.agentId,
         role: input.agentRole,
         cwd: process.cwd(),
         prompt,
         responseLanguage: this.threadResponseLanguage,
+        currentSession: session.initialized
+          ? {
+              conversationId: session.conversationId ?? null,
+              activeInvocationId: session.activeInvocationId ?? null,
+              lastActivityAt: session.lastActivityAt,
+            }
+          : undefined,
         runtimeConfig: roleRuntime.config,
       });
 
@@ -418,14 +428,7 @@ export class FleetService {
   }
 
   private requireConfiguredRuntime(role: AgentRole): ResolvedRoleRuntimeConfig {
-    const resolved = this.runtimeConfigByRole.get(role) ?? resolveRoleRuntimeConfig(null, role);
-    if (resolved.provider !== this.agentRuntime.provider) {
-      throw new CodefleetError(
-        "ERR_VALIDATION",
-        `configured runtime provider ${resolved.provider} is not available for role=${role}`,
-      );
-    }
-    return resolved;
+    return this.runtimeConfigByRole.get(role) ?? resolveRoleRuntimeConfig(null, role);
   }
 
   private async tryMigrateLegacyRuntimeCollection(): Promise<AgentRuntimeCollection | null> {
@@ -842,6 +845,24 @@ function upsertSession(collection: AgentSessionCollection, input: AgentSession):
   return input;
 }
 
+function normalizeAgentRuntimeResolver(
+  input: AgentRuntimeResolver | RoleAgentRuntime | undefined,
+  appServerClient: AppServerClient,
+): AgentRuntimeResolver {
+  if (!input) {
+    return new StaticAgentRuntimeResolver(
+      new Map<AgentProviderId, RoleAgentRuntime>([
+        ["codex-app-server", new CodexAppServerRuntime(appServerClient)],
+        ["claude-agent-sdk", new ClaudeAgentSdkRuntime()],
+      ]),
+    );
+  }
+  if (isAgentRuntimeResolver(input)) {
+    return input;
+  }
+  return new StaticAgentRuntimeResolver(new Map<AgentProviderId, RoleAgentRuntime>([[input.provider, input]]));
+}
+
 async function safeRead(filePath: string): Promise<string> {
   try {
     return await fs.readFile(filePath, "utf8");
@@ -914,8 +935,12 @@ function parseConfiguredRuntime(value: Record<string, unknown>, label: string): 
   };
 }
 
-function isSupportedAgentProvider(value: unknown): value is AgentProviderId | "claude-agent-sdk" {
+function isSupportedAgentProvider(value: unknown): value is AgentProviderId {
   return typeof value === "string" && SUPPORTED_AGENT_PROVIDERS.includes(value as (typeof SUPPORTED_AGENT_PROVIDERS)[number]);
+}
+
+function isAgentRuntimeResolver(value: AgentRuntimeResolver | RoleAgentRuntime): value is AgentRuntimeResolver {
+  return "resolve" in value && typeof value.resolve === "function";
 }
 
 function parseJsonObject(raw: string, filePath: string): Record<string, unknown> {

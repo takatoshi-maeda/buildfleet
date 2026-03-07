@@ -34,9 +34,10 @@
     "vitest": "^2.1.8"
   },
   "dependencies": {
-    "ai-kit": "file:vendor/ai-kit",
+    "@anthropic-ai/claude-agent-sdk": "^0.2.71",
     "@hono/node-server": "^1.13.7",
     "@modelcontextprotocol/sdk": "^1.7.0",
+    "ai-kit": "file:vendor/ai-kit",
     "ajv": "^8.17.1",
     "ajv-formats": "^3.0.1",
     "commander": "^12.1.0",
