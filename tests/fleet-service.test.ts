@@ -4,6 +4,13 @@ import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { FleetService } from "../src/domain/fleet/fleet-service.js";
 import type { FleetApiServerLifecycle, FleetApiServerStatus } from "../src/api/mcp/fleet-api-server-lifecycle.js";
+import type {
+  ExecuteRoleAgentInput,
+  ExecuteRoleAgentResult,
+  PrepareRoleAgentInput,
+  PrepareRoleAgentResult,
+  RoleAgentRuntime,
+} from "../src/domain/fleet/role-agent-runtime.js";
 import type { AgentRole } from "../src/domain/roles-model.js";
 import type { AppServerSession } from "../src/domain/app-server-session-model.js";
 import type { FleetProcessStartResult } from "../src/infra/process/fleet-process-manager.js";
@@ -119,6 +126,43 @@ class FakeHookCommandRunner implements HookCommandRunner {
       phase: options.env.CODEFLEET_HOOK_PHASE,
       role: options.env.CODEFLEET_HOOK_ROLE,
     });
+  }
+}
+
+class FakeRoleAgentRuntime implements RoleAgentRuntime {
+  readonly provider = "codex-app-server" as const;
+  public prepared: PrepareRoleAgentInput[] = [];
+  public executed: ExecuteRoleAgentInput[] = [];
+  public shutdowns: string[] = [];
+
+  async prepareAgent(input: PrepareRoleAgentInput): Promise<PrepareRoleAgentResult> {
+    this.prepared.push(input);
+    return {
+      provider: this.provider,
+      pid: 4444,
+      startedAt: "2026-01-01T00:00:00.000Z",
+      session: {
+        threadId: `${input.agentId}-prepared-thread`,
+        activeTurnId: `${input.agentId}-prepared-turn`,
+        lastActivityAt: "2026-01-01T00:00:01.000Z",
+      },
+    };
+  }
+
+  async execute(input: ExecuteRoleAgentInput): Promise<ExecuteRoleAgentResult> {
+    this.executed.push(input);
+    return {
+      provider: this.provider,
+      session: {
+        threadId: `${input.agentId}-runtime-thread`,
+        activeTurnId: `${input.agentId}-runtime-turn`,
+        lastActivityAt: "2026-01-01T00:00:02.000Z",
+      },
+    };
+  }
+
+  async shutdownAgent(agentId: string): Promise<void> {
+    this.shutdowns.push(agentId);
   }
 }
 
@@ -304,6 +348,58 @@ describe("FleetService", () => {
       "polisher-1",
       "reviewer-1",
     ]);
+  });
+
+  it("uses the injected role runtime boundary instead of app-server RPC methods directly", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codefleet-fleet-"));
+    const rolesPath = path.join(tempDir, ".codefleet/roles.json");
+    const runtimeDir = path.join(tempDir, ".codefleet/runtime");
+    const logDir = path.join(tempDir, ".codefleet/logs/agents");
+
+    const runtime = new FakeRoleAgentRuntime();
+    const appServer = new FakeAppServerClient();
+    const processManager = new FakeProcessManager();
+    const service = new FleetService(
+      rolesPath,
+      runtimeDir,
+      logDir,
+      processManager as never,
+      appServer as never,
+      undefined,
+      undefined,
+      undefined,
+      runtime,
+    );
+
+    await service.up({ reviewers: 0, polishers: 0, developers: 0, gatekeepers: 0 });
+    expect(runtime.prepared.map((entry) => entry.agentId)).toEqual(["orchestrator-1", "curator-1"]);
+    expect(appServer.started).toEqual([]);
+
+    await service.dispatchAgentEvent({
+      agentId: "curator-1",
+      agentRole: "Curator",
+      event: { type: "docs.update", paths: ["docs/spec.md"] },
+    });
+    expect(runtime.executed).toHaveLength(1);
+    expect(runtime.executed[0]).toMatchObject({
+      agentId: "curator-1",
+      role: "Curator",
+      responseLanguage: undefined,
+    });
+    expect(runtime.executed[0]?.prompt).toContain("docs/spec.md");
+    expect(appServer.startedThreads).toEqual([]);
+    expect(appServer.startedTurns).toEqual([]);
+
+    const status = await service.status("Curator");
+    expect(status.sessions[0]).toMatchObject({
+      threadId: "curator-1-runtime-thread",
+      activeTurnId: "curator-1-runtime-turn",
+    });
+
+    await service.down({ all: true });
+    expect(runtime.shutdowns.sort()).toEqual(["curator-1", "orchestrator-1"]);
+    expect(processManager.stopped).toEqual([4444, 4444]);
+    expect(appServer.shutdowns).toEqual([]);
   });
 
   it("uses role counts, filters by role and tails logs", async () => {

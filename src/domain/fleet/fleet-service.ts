@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { AppServerClient } from "../../infra/appserver/app-server-client.js";
+import { CodexAppServerRuntime } from "../../infra/agent-runtime/codex-app-server-runtime.js";
 import { JsonRepository } from "../../infra/fs/json-repository.js";
 import { FleetProcessManager } from "../../infra/process/fleet-process-manager.js";
 import { CodefleetError } from "../../shared/errors.js";
@@ -12,6 +13,7 @@ import type { RoleHookPhase, RoleHooksByAgentRole } from "../hooks-model.js";
 import type { AgentRole } from "../roles-model.js";
 import { SCHEMA_PATHS } from "../schema-paths.js";
 import { ShellHookCommandRunner, type HookCommandRunner } from "../../infra/process/hook-command-runner.js";
+import type { RoleAgentRuntime } from "./role-agent-runtime.js";
 import type {
   FleetApiServerLifecycle,
   FleetApiServerStatus,
@@ -57,6 +59,7 @@ export class FleetService {
   private threadResponseLanguage?: string;
   private reviewerPlaywrightServerUrl?: string;
   private codexConfig: Record<string, unknown> = {};
+  private readonly agentRuntime: RoleAgentRuntime;
 
   constructor(
     private readonly rolesPath: string = DEFAULT_ROLES_PATH,
@@ -67,10 +70,14 @@ export class FleetService {
     private readonly hooksPath?: string,
     private readonly hookCommandRunner: HookCommandRunner = new ShellHookCommandRunner(),
     private readonly apiServerLifecycle?: FleetApiServerLifecycle,
+    agentRuntime?: RoleAgentRuntime,
   ) {
     // Retained for compatibility with existing constructor call sites.
     void this.rolesPath;
     void this.hooksPath;
+    // Keep the old constructor contract working while Phase 1 moves FleetService
+    // to a higher-level runtime abstraction.
+    this.agentRuntime = agentRuntime ?? new CodexAppServerRuntime(this.appServerClient);
     this.runtimeRepository = new JsonRepository<AgentRuntimeCollection>(
       path.join(runtimeDir, "agents.json"),
       SCHEMA_PATHS.agentRuntime,
@@ -154,31 +161,28 @@ export class FleetService {
 
       try {
         const startupPrompt = await getRoleStartupPrompt(target.role);
-        const processStart = await this.appServerClient.startAgent({
+        const prepared = await this.agentRuntime.prepareAgent({
           agentId: target.id,
           role: target.role,
-          prompt: startupPrompt,
           cwd: process.cwd(),
           detached: Boolean(input.detached),
+          startupPrompt,
           playwrightServerUrl: target.role === "Reviewer" ? this.reviewerPlaywrightServerUrl : undefined,
-          codexConfig: this.codexConfig,
+          runtimeConfig: this.codexConfig,
         });
-        runtimeAgent.pid = processStart.pid;
-        runtimeAgent.startedAt = processStart.startedAt;
-        runtimeAgent.lastHeartbeatAt = processStart.startedAt;
-
-        const handshake = await this.appServerClient.handshake(target.id);
+        runtimeAgent.pid = prepared.pid;
+        runtimeAgent.startedAt = prepared.startedAt;
         runtimeAgent.status = "running";
-        runtimeAgent.lastHeartbeatAt = handshake.lastNotificationAt;
+        runtimeAgent.lastHeartbeatAt = prepared.session.lastActivityAt;
         runtimeAgent.lastError = undefined;
 
         const session = upsertSession(sessions, {
           agentId: target.id,
           status: "ready",
           initialized: true,
-          threadId: handshake.threadId,
-          activeTurnId: handshake.activeTurnId,
-          lastNotificationAt: handshake.lastNotificationAt,
+          threadId: prepared.session.threadId,
+          activeTurnId: prepared.session.activeTurnId,
+          lastNotificationAt: prepared.session.lastActivityAt,
         });
         session.lastError = undefined;
       } catch (error) {
@@ -226,9 +230,9 @@ export class FleetService {
         lastHeartbeatAt: now,
       });
 
-      // Shutdown via AppServerClient first so pending RPC timers/stream readers are
-      // synchronously released even if the child process does not exit promptly.
-      await this.appServerClient.shutdownAgent(target.id);
+      // Runtime shutdown releases provider-specific resources before the
+      // process manager attempts to stop any local child process.
+      await this.agentRuntime.shutdownAgent(target.id);
       await this.processManager.stop(pidToStop);
       runtimeAgent.status = "stopped";
       runtimeAgent.pid = null;
@@ -312,25 +316,21 @@ export class FleetService {
         lastNotificationAt: new Date().toISOString(),
       });
 
-      const started = await this.appServerClient.startThread(input.agentId, {
-        baseInstructions: buildThreadLanguageInstruction(this.threadResponseLanguage),
-        codexConfig: this.codexConfig,
-      });
-      const threadId = started.threadId;
       const prompt = await this.buildEventPrompt(input.agentRole, input.event);
-      const turn = await this.appServerClient.startTurn(input.agentId, {
-        threadId,
-        input: [{ type: "text", text: prompt }],
+      const execution = await this.agentRuntime.execute({
+        agentId: input.agentId,
+        role: input.agentRole,
+        cwd: process.cwd(),
+        prompt,
+        responseLanguage: this.threadResponseLanguage,
+        runtimeConfig: this.codexConfig,
       });
-      if (turn.turnId) {
-        await this.appServerClient.waitForTurnCompletion(input.agentId, threadId, turn.turnId);
-      }
 
       session.status = "ready";
       session.initialized = true;
-      session.threadId = threadId;
-      session.activeTurnId = turn.turnId;
-      session.lastNotificationAt = turn.lastNotificationAt;
+      session.threadId = execution.session.threadId;
+      session.activeTurnId = execution.session.activeTurnId;
+      session.lastNotificationAt = execution.session.lastActivityAt;
       session.lastError = undefined;
       sessions.updatedAt = new Date().toISOString();
       await this.sessionRepository.save(sessions);
@@ -513,14 +513,6 @@ export class FleetService {
     // a temporary workspace in tests without changing process.cwd().
     return path.join(path.dirname(this.rolesPath), CONFIG_FILE_NAME);
   }
-}
-
-function buildThreadLanguageInstruction(lang: string | undefined): string | undefined {
-  if (!lang) {
-    return undefined;
-  }
-  // This instruction is injected at thread start so all replies in the thread consistently follow the requested language.
-  return `All responses must be in ${lang}.`;
 }
 
 function readCodexConfig(config: Record<string, unknown> | null): Record<string, unknown> {
