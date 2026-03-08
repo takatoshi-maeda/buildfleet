@@ -3,19 +3,21 @@ import { ClaudeAgentSdkRuntime } from "../src/infra/agent-runtime/claude-agent-s
 import type { ClaudeAgentSdkClient } from "../src/infra/agent-runtime/claude-agent-sdk-client.js";
 
 class FakeClaudeQuery implements AsyncIterable<{
-  type: "system" | "assistant" | "result";
+  type: "system" | "assistant" | "result" | "stream_event" | "tool_use_summary";
   subtype?: string;
   uuid: string;
   session_id: string;
+  [key: string]: unknown;
 }> {
   public closed = false;
 
   constructor(
     private readonly messages: Array<{
-      type: "system" | "assistant" | "result";
+      type: "system" | "assistant" | "result" | "stream_event" | "tool_use_summary";
       subtype?: string;
       uuid: string;
       session_id: string;
+      [key: string]: unknown;
     }>,
   ) {}
 
@@ -86,6 +88,7 @@ describe("ClaudeAgentSdkRuntime", () => {
       permissionMode: "acceptEdits",
       allowedTools: ["Bash", "Read"],
       maxTurns: 20,
+      includePartialMessages: true,
       settingSources: [],
       tools: { type: "preset", preset: "claude_code" },
     });
@@ -123,5 +126,115 @@ describe("ClaudeAgentSdkRuntime", () => {
     await execution;
     expect(client.calls[0]?.options.resume).toBe("sess-existing");
     expect(client.calls[0]?.options.settingSources).toEqual(["project"]);
+  });
+
+  it("emits Claude thinking and tool-use progress when partial messages are enabled", async () => {
+    const captured: string[] = [];
+    const client: ClaudeAgentSdkClient = {
+      query() {
+        return new FakeClaudeQuery([
+          { type: "system", subtype: "init", uuid: "msg-init", session_id: "sess-123" },
+          {
+            type: "stream_event",
+            uuid: "msg-stream-thinking",
+            session_id: "sess-123",
+            event: {
+              type: "content_block_start",
+              index: 0,
+              content_block: { type: "thinking", thinking: "", signature: "sig-1" },
+            },
+          },
+          {
+            type: "stream_event",
+            uuid: "msg-stream-thinking-delta",
+            session_id: "sess-123",
+            event: {
+              type: "content_block_delta",
+              index: 0,
+              delta: { type: "thinking_delta", thinking: "spec を確認する" },
+            },
+          },
+          {
+            type: "stream_event",
+            uuid: "msg-stream-thinking-stop",
+            session_id: "sess-123",
+            event: {
+              type: "content_block_stop",
+              index: 0,
+            },
+          },
+          {
+            type: "stream_event",
+            uuid: "msg-stream-tool",
+            session_id: "sess-123",
+            event: {
+              type: "content_block_start",
+              index: 1,
+              content_block: {
+                type: "tool_use",
+                id: "tool-1",
+                name: "Bash",
+                input: {},
+              },
+            },
+          },
+          {
+            type: "stream_event",
+            uuid: "msg-stream-tool-delta",
+            session_id: "sess-123",
+            event: {
+              type: "content_block_delta",
+              index: 1,
+              delta: { type: "input_json_delta", partial_json: '{"command":"pwd"}' },
+            },
+          },
+          {
+            type: "stream_event",
+            uuid: "msg-stream-tool-stop",
+            session_id: "sess-123",
+            event: {
+              type: "content_block_stop",
+              index: 1,
+            },
+          },
+          {
+            type: "system",
+            subtype: "task_progress",
+            uuid: "msg-progress",
+            session_id: "sess-123",
+            task_id: "task-1",
+            description: "running pwd",
+            last_tool_name: "Bash",
+            usage: { total_tokens: 10, tool_uses: 1, duration_ms: 100 },
+          },
+          {
+            type: "tool_use_summary",
+            uuid: "msg-tool-summary",
+            session_id: "sess-123",
+            summary: "Bash completed successfully",
+            preceding_tool_use_ids: ["tool-1"],
+          },
+          { type: "result", subtype: "success", uuid: "msg-result", session_id: "sess-123" },
+        ]);
+      },
+    };
+    const runtime = new ClaudeAgentSdkRuntime(client, (event) => {
+      if (event.message) {
+        captured.push(event.message);
+      }
+    });
+
+    await runtime.execute({
+      agentId: "curator-1",
+      role: "Curator",
+      cwd: "/workspace",
+      prompt: "Review docs",
+      runtimeConfig: {},
+    });
+
+    expect(captured).toContain("reasoning: spec を確認する");
+    expect(captured).toContain('tool start: Bash input={"command":"pwd"}');
+    expect(captured).toContain("tool progress: Bash running pwd");
+    expect(captured).toContain("tool end: Bash completed successfully");
   });
 });

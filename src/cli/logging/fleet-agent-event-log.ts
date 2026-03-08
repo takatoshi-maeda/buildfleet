@@ -140,6 +140,7 @@ function isAllowedConsoleMessage(message: string): boolean {
   return (
     message.startsWith("tool start: ") ||
     message.startsWith("tool end: ") ||
+    message.startsWith("tool progress: ") ||
     message.startsWith("reasoning: ") ||
     message.startsWith("assistant: ") ||
     message.startsWith("conversation started: ") ||

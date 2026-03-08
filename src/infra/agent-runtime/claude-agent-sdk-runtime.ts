@@ -19,6 +19,7 @@ const SUPPORTED_SETTING_SOURCES = ["user", "project", "local"] as const;
 export class ClaudeAgentSdkRuntime implements RoleAgentRuntime {
   readonly provider = "claude-agent-sdk" as const;
   private readonly inFlightQueries = new Map<string, { close(): void }>();
+  private readonly streamBlocksByAgent = new Map<string, Map<number, ClaudeStreamBlockState>>();
 
   constructor(
     private readonly client: ClaudeAgentSdkClient = new DefaultClaudeAgentSdkClient(),
@@ -57,10 +58,14 @@ export class ClaudeAgentSdkRuntime implements RoleAgentRuntime {
         lastActivityAt = new Date().toISOString();
         conversationId = message.session_id;
         activeInvocationId = readInvocationId(message, activeInvocationId);
-        this.onEvent?.(mapClaudeMessageToRuntimeEvent(input.agentId, message, conversationId, activeInvocationId));
+        const event = this.mapMessageToRuntimeEvent(input.agentId, message, conversationId, activeInvocationId);
+        if (event) {
+          this.onEvent?.(event);
+        }
       }
     } finally {
       this.inFlightQueries.delete(input.agentId);
+      this.streamBlocksByAgent.delete(input.agentId);
     }
 
     return {
@@ -76,10 +81,149 @@ export class ClaudeAgentSdkRuntime implements RoleAgentRuntime {
   async shutdownAgent(agentId: string): Promise<void> {
     this.inFlightQueries.get(agentId)?.close();
     this.inFlightQueries.delete(agentId);
+    this.streamBlocksByAgent.delete(agentId);
+  }
+
+  private mapMessageToRuntimeEvent(
+    agentId: string,
+    message: ClaudeAgentSdkMessage,
+    conversationId: string | null,
+    activeInvocationId: string | null,
+  ) {
+    if (message.type === "stream_event") {
+      return this.mapClaudeStreamEventToRuntimeEvent(agentId, message, conversationId, activeInvocationId);
+    }
+    return mapClaudeMessageToRuntimeEvent(agentId, message, conversationId, activeInvocationId);
+  }
+
+  private mapClaudeStreamEventToRuntimeEvent(
+    agentId: string,
+    message: Extract<ClaudeAgentSdkMessage, { type: "stream_event" }>,
+    conversationId: string | null,
+    activeInvocationId: string | null,
+  ) {
+    const event = message.event;
+    const blocks = getOrCreateAgentStreamBlocks(this.streamBlocksByAgent, agentId);
+
+    if (event.type === "content_block_start") {
+      if (event.content_block.type === "thinking") {
+        blocks.set(event.index, {
+          type: "thinking",
+          thinking: event.content_block.thinking ?? "",
+        });
+        return null;
+      }
+      if (event.content_block.type === "tool_use") {
+        blocks.set(event.index, {
+          type: "tool_use",
+          toolName: event.content_block.name,
+          toolUseId: event.content_block.id,
+          inputValue: event.content_block.input,
+          inputJsonBuffer: "",
+        });
+        return null;
+      }
+      return null;
+    }
+
+    if (event.type === "content_block_delta") {
+      const block = blocks.get(event.index);
+      if (!block) {
+        return null;
+      }
+      if (block.type === "thinking" && event.delta.type === "thinking_delta") {
+        block.thinking += event.delta.thinking;
+        return null;
+      }
+      if (block.type === "tool_use" && event.delta.type === "input_json_delta") {
+        block.inputJsonBuffer += event.delta.partial_json;
+        return null;
+      }
+      return null;
+    }
+
+    if (event.type === "content_block_stop") {
+      const block = blocks.get(event.index);
+      blocks.delete(event.index);
+      if (!block) {
+        return null;
+      }
+      if (block.type === "thinking") {
+        const mergedThinking = block.thinking.trim();
+        if (mergedThinking.length === 0) {
+          return null;
+        }
+        return {
+          agentId,
+          provider: "claude-agent-sdk" as const,
+          occurredAt: new Date().toISOString(),
+          kind: "reasoning" as const,
+          message: `reasoning: ${mergedThinking}`,
+          nativeType: "stream_event/content_block_stop/thinking",
+          conversationId,
+          activeInvocationId,
+          payload: {
+            index: event.index,
+            thinking: mergedThinking,
+          },
+        };
+      }
+      if (block.type === "tool_use") {
+        const resolvedInput = parseClaudeToolInputBuffer(block.inputJsonBuffer, block.inputValue);
+        const inputSummary = summarizeClaudeToolInput(resolvedInput);
+        return {
+          agentId,
+          provider: "claude-agent-sdk" as const,
+          occurredAt: new Date().toISOString(),
+          kind: "tool_started" as const,
+          message: inputSummary ? `tool start: ${block.toolName} input=${inputSummary}` : `tool start: ${block.toolName}`,
+          nativeType: "stream_event/content_block_stop/tool_use",
+          conversationId,
+          activeInvocationId,
+          payload: {
+            index: event.index,
+            tool_use_id: block.toolUseId,
+            tool_name: block.toolName,
+            input: resolvedInput,
+          },
+        };
+      }
+    }
+
+    return {
+      agentId,
+      provider: "claude-agent-sdk" as const,
+      occurredAt: new Date().toISOString(),
+      kind: "native" as const,
+      nativeType: `stream_event/${event.type}`,
+      conversationId,
+      activeInvocationId,
+      payload: {
+        eventType: event.type,
+      },
+    };
   }
 }
 
+interface ClaudeThinkingStreamBlockState {
+  type: "thinking";
+  thinking: string;
+}
+
+interface ClaudeToolUseStreamBlockState {
+  type: "tool_use";
+  toolName: string;
+  toolUseId: string;
+  inputValue: unknown;
+  inputJsonBuffer: string;
+}
+
+type ClaudeStreamBlockState = ClaudeThinkingStreamBlockState | ClaudeToolUseStreamBlockState;
+
 function validateClaudeRuntimeConfig(runtimeConfig: Record<string, unknown>): void {
+  if ("includePartialMessages" in runtimeConfig && typeof runtimeConfig.includePartialMessages !== "boolean") {
+    throw new CodefleetError("ERR_VALIDATION", "Claude runtime includePartialMessages must be a boolean");
+  }
   if ("permissionMode" in runtimeConfig && !isSupportedPermissionMode(runtimeConfig.permissionMode)) {
     throw new CodefleetError("ERR_VALIDATION", "Claude runtime permissionMode is invalid");
   }
@@ -114,6 +258,7 @@ function buildClaudeQueryOptions(input: ExecuteRoleAgentInput): ClaudeAgentSdkOp
   const persistSession = input.runtimeConfig.persistSession === true;
   const options: ClaudeAgentSdkOptions = {
     cwd: input.cwd,
+    includePartialMessages: input.runtimeConfig.includePartialMessages !== false,
     model: readOptionalString(input.runtimeConfig.model),
     permissionMode: isSupportedPermissionMode(input.runtimeConfig.permissionMode)
       ? input.runtimeConfig.permissionMode
@@ -216,8 +361,8 @@ function mapClaudeMessageToRuntimeEvent(
       agentId,
       provider: "claude-agent-sdk" as const,
       occurredAt: new Date().toISOString(),
-      kind: "tool_started" as const,
-      message: `tool start: ${message.tool_name}`,
+      kind: "native" as const,
+      message: undefined,
       nativeType: "tool_progress",
       conversationId,
       activeInvocationId,
@@ -225,6 +370,23 @@ function mapClaudeMessageToRuntimeEvent(
         tool_use_id: message.tool_use_id,
         tool_name: message.tool_name,
         elapsed_time_seconds: message.elapsed_time_seconds,
+      },
+    };
+  }
+
+  if (message.type === "tool_use_summary") {
+    return {
+      agentId,
+      provider: "claude-agent-sdk" as const,
+      occurredAt: new Date().toISOString(),
+      kind: "tool_finished" as const,
+      message: `tool end: ${message.summary}`,
+      nativeType: "tool_use_summary",
+      conversationId,
+      activeInvocationId,
+      payload: {
+        summary: message.summary,
+        preceding_tool_use_ids: message.preceding_tool_use_ids,
       },
     };
   }
@@ -281,6 +443,25 @@ function mapClaudeMessageToRuntimeEvent(
     };
   }
 
+  if (message.type === "system" && message.subtype === "task_progress") {
+    return {
+      agentId,
+      provider: "claude-agent-sdk" as const,
+      occurredAt: new Date().toISOString(),
+      kind: "native" as const,
+      message: `tool progress: ${(message.last_tool_name ?? "task").trim()} ${message.description}`.trim(),
+      nativeType: "system/task_progress",
+      conversationId,
+      activeInvocationId,
+      payload: {
+        task_id: message.task_id,
+        description: message.description,
+        last_tool_name: message.last_tool_name,
+        usage: message.usage,
+      },
+    };
+  }
+
   if (message.type === "result") {
     return {
       agentId,
@@ -331,6 +512,42 @@ function readClaudeAssistantText(message: Extract<ClaudeAgentSdkMessage, { type:
     .filter((part): part is string => typeof part === "string" && part.length > 0)
     .join("\n");
   return text.length > 0 ? `assistant: ${text}` : undefined;
+}
+
+function summarizeClaudeToolInput(value: unknown): string | null {
+  if (value === undefined) {
+    return null;
+  }
+  const serialized = JSON.stringify(value);
+  if (!serialized || serialized === "{}") {
+    return null;
+  }
+  return serialized.length <= 160 ? serialized : `${serialized.slice(0, 160)}...[truncated ${serialized.length - 160} chars]`;
+}
+
+function parseClaudeToolInputBuffer(buffer: string, fallback: unknown): unknown {
+  const trimmed = buffer.trim();
+  if (trimmed.length === 0) {
+    return fallback;
+  }
+  try {
+    return JSON.parse(trimmed) as unknown;
+  } catch {
+    return fallback;
+  }
+}
+
+function getOrCreateAgentStreamBlocks(
+  blocksByAgent: Map<string, Map<number, ClaudeStreamBlockState>>,
+  agentId: string,
+): Map<number, ClaudeStreamBlockState> {
+  const existing = blocksByAgent.get(agentId);
+  if (existing) {
+    return existing;
+  }
+  const created = new Map<number, ClaudeStreamBlockState>();
+  blocksByAgent.set(agentId, created);
+  return created;
 }
 
 function isSupportedPermissionMode(value: unknown): value is NonNullable<ClaudeAgentSdkOptions["permissionMode"]> {

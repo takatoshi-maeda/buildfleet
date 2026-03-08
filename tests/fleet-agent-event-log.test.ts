@@ -194,4 +194,23 @@ describe("fleet agent event log formatting", () => {
       summary: "invocation finished",
     });
   });
+
+  it("emits console logs for Claude tool progress messages", () => {
+    expect(
+      formatAgentRuntimeConsoleLog({
+        agentId: "curator-1",
+        provider: "claude-agent-sdk",
+        occurredAt: "2026-03-08T10:30:00.000Z",
+        kind: "native",
+        message: "tool progress: Bash running pwd",
+        nativeType: "system/task_progress",
+      }),
+    ).toEqual({
+      ts: "2026-03-08T10:30:00.000Z",
+      level: "info",
+      event: "fleet.agent.output",
+      agentId: "curator-1",
+      message: "tool progress: Bash running pwd",
+    });
+  });
 });
