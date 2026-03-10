@@ -39,6 +39,7 @@ const FIXED_CURATOR_COUNT = 1;
 const LEGACY_APP_SERVER_SESSION_FILE = "app-server-sessions.json";
 const SUPPORTED_AGENT_PROVIDERS = ["codex-app-server", "claude-agent-sdk"] as const;
 const DEFAULT_CLAUDE_AGENT_SDK_PERMISSION_MODE = "bypassPermissions" as const;
+const DEFAULT_CLAUDE_AGENT_SDK_AUTO_MEMORY_ENABLED = false;
 
 interface ResolvedRoleRuntimeConfig {
   provider: AgentProviderId | "claude-agent-sdk";
@@ -48,15 +49,27 @@ interface ResolvedRoleRuntimeConfig {
 const BUILTIN_ROLE_RUNTIME_DEFAULTS: Record<AgentRole, ResolvedRoleRuntimeConfig> = {
   Orchestrator: {
     provider: "claude-agent-sdk",
-    config: { model: "claude-opus-4-6", permissionMode: DEFAULT_CLAUDE_AGENT_SDK_PERMISSION_MODE },
+    config: {
+      model: "claude-opus-4-6",
+      permissionMode: DEFAULT_CLAUDE_AGENT_SDK_PERMISSION_MODE,
+      settings: { autoMemoryEnabled: DEFAULT_CLAUDE_AGENT_SDK_AUTO_MEMORY_ENABLED },
+    },
   },
   Curator: {
     provider: "claude-agent-sdk",
-    config: { model: "claude-opus-4-6", permissionMode: DEFAULT_CLAUDE_AGENT_SDK_PERMISSION_MODE },
+    config: {
+      model: "claude-opus-4-6",
+      permissionMode: DEFAULT_CLAUDE_AGENT_SDK_PERMISSION_MODE,
+      settings: { autoMemoryEnabled: DEFAULT_CLAUDE_AGENT_SDK_AUTO_MEMORY_ENABLED },
+    },
   },
   FrontendDeveloper: {
     provider: "claude-agent-sdk",
-    config: { model: "claude-opus-4-6", permissionMode: DEFAULT_CLAUDE_AGENT_SDK_PERMISSION_MODE },
+    config: {
+      model: "claude-opus-4-6",
+      permissionMode: DEFAULT_CLAUDE_AGENT_SDK_PERMISSION_MODE,
+      settings: { autoMemoryEnabled: DEFAULT_CLAUDE_AGENT_SDK_AUTO_MEMORY_ENABLED },
+    },
   },
   Developer: {
     provider: "codex-app-server",
@@ -987,12 +1000,21 @@ function applyProviderRuntimeDefaults(
   provider: AgentProviderId | "claude-agent-sdk",
   runtimeConfig: Record<string, unknown>,
 ): Record<string, unknown> {
-  if (provider !== "claude-agent-sdk" || "permissionMode" in runtimeConfig) {
+  if (provider !== "claude-agent-sdk") {
     return runtimeConfig;
   }
+  const settings = isRecord(runtimeConfig.settings) ? runtimeConfig.settings : {};
   return {
     ...runtimeConfig,
-    permissionMode: DEFAULT_CLAUDE_AGENT_SDK_PERMISSION_MODE,
+    permissionMode:
+      "permissionMode" in runtimeConfig ? runtimeConfig.permissionMode : DEFAULT_CLAUDE_AGENT_SDK_PERMISSION_MODE,
+    settings: {
+      ...settings,
+      autoMemoryEnabled:
+        typeof settings.autoMemoryEnabled === "boolean"
+          ? settings.autoMemoryEnabled
+          : DEFAULT_CLAUDE_AGENT_SDK_AUTO_MEMORY_ENABLED,
+    },
   };
 }
 

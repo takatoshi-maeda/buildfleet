@@ -11,4 +11,4 @@ Execution policy:
 - Prefer minimal, coherent diffs with explicit intent.
 - Verify changes locally using the project test/build commands.
 - Communicate assumptions, risks, and remaining gaps precisely.
-- If you discover implementation knowledge that will help subsequent contributors (for example pitfalls, environment constraints, or recovery procedures), record or update it in `MEMORY.md`.
+- If you discover implementation knowledge that will help subsequent contributors (for example pitfalls, environment constraints, or recovery procedures), record or update the workspace-local memory file at `./MEMORY.md` (the startup directory).

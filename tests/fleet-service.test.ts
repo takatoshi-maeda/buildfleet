@@ -618,9 +618,15 @@ describe("FleetService", () => {
 
     await service.up();
     expect(claudeRuntime.prepared.map((entry) => [entry.agentId, entry.runtimeConfig])).toEqual([
-      ["orchestrator-1", { model: "claude-opus-4-6", permissionMode: "bypassPermissions" }],
-      ["curator-1", { model: "claude-opus-4-6", permissionMode: "bypassPermissions" }],
-      ["frontend-developer-1", { model: "claude-opus-4-6", permissionMode: "bypassPermissions" }],
+      [
+        "orchestrator-1",
+        { model: "claude-opus-4-6", permissionMode: "bypassPermissions", settings: { autoMemoryEnabled: false } },
+      ],
+      ["curator-1", { model: "claude-opus-4-6", permissionMode: "bypassPermissions", settings: { autoMemoryEnabled: false } }],
+      [
+        "frontend-developer-1",
+        { model: "claude-opus-4-6", permissionMode: "bypassPermissions", settings: { autoMemoryEnabled: false } },
+      ],
     ]);
     expect(codexRuntime.prepared.map((entry) => [entry.agentId, entry.runtimeConfig])).toEqual([
       ["gatekeeper-1", { model: "gpt-5.4" }],
@@ -632,7 +638,11 @@ describe("FleetService", () => {
     const status = await service.status();
     expect(status.agents.find((agent) => agent.id === "orchestrator-1")).toMatchObject({
       provider: "claude-agent-sdk",
-      runtimeOptions: { model: "claude-opus-4-6", permissionMode: "bypassPermissions" },
+      runtimeOptions: {
+        model: "claude-opus-4-6",
+        permissionMode: "bypassPermissions",
+        settings: { autoMemoryEnabled: false },
+      },
     });
     expect(status.agents.find((agent) => agent.id === "developer-1")).toMatchObject({
       provider: "codex-app-server",
@@ -764,6 +774,7 @@ describe("FleetService", () => {
     expect(claudeRuntime.prepared.find((entry) => entry.agentId === "orchestrator-1")?.runtimeConfig).toEqual({
       model: "claude-opus-4-6",
       permissionMode: "bypassPermissions",
+      settings: { autoMemoryEnabled: false },
     });
     expect(codexRuntime.prepared.find((entry) => entry.agentId === "developer-1")?.runtimeConfig).toEqual({
       model: "gpt-5.4",
@@ -924,6 +935,7 @@ describe("FleetService", () => {
       model: "claude-sonnet-4-5",
       permissionMode: "acceptEdits",
       persistSession: false,
+      settings: { autoMemoryEnabled: false },
     });
     expect(status.sessions.find((session) => session.agentId === "orchestrator-1")?.provider).toBe("claude-agent-sdk");
   });
@@ -966,6 +978,7 @@ describe("FleetService", () => {
       model: "claude-sonnet-4-5",
       permissionMode: "bypassPermissions",
       persistSession: false,
+      settings: { autoMemoryEnabled: false },
     });
 
     const status = await service.status("Orchestrator");
@@ -973,6 +986,51 @@ describe("FleetService", () => {
       model: "claude-sonnet-4-5",
       permissionMode: "bypassPermissions",
       persistSession: false,
+      settings: { autoMemoryEnabled: false },
+    });
+  });
+
+  it("preserves explicit claude-agent-sdk autoMemoryEnabled config", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codefleet-fleet-"));
+    const rolesPath = path.join(tempDir, ".codefleet/roles.json");
+    const runtimeDir = path.join(tempDir, ".codefleet/runtime");
+    const logDir = path.join(tempDir, ".codefleet/logs/agents");
+    await writeRoleRuntimeConfig(tempDir, {
+      Orchestrator: {
+        provider: "claude-agent-sdk",
+        config: { model: "claude-sonnet-4-5", settings: { autoMemoryEnabled: true } },
+      },
+    });
+
+    const claudeRuntime = new FakeRoleAgentRuntime();
+    Object.defineProperty(claudeRuntime, "provider", {
+      value: "claude-agent-sdk",
+    });
+    const resolver = new FakeAgentRuntimeResolver(
+      new Map([
+        ["codex-app-server", new FakeRoleAgentRuntime()],
+        ["claude-agent-sdk", claudeRuntime],
+      ]),
+    );
+
+    const service = new FleetService(
+      rolesPath,
+      runtimeDir,
+      logDir,
+      new FakeProcessManager() as never,
+      new FakeAppServerClient() as never,
+      undefined,
+      undefined,
+      undefined,
+      resolver,
+    );
+
+    await service.up({ gatekeepers: 0, developers: 0, frontendDevelopers: 0, polishers: 0, reviewers: 0 });
+
+    expect(claudeRuntime.prepared[0]?.runtimeConfig).toEqual({
+      model: "claude-sonnet-4-5",
+      permissionMode: "bypassPermissions",
+      settings: { autoMemoryEnabled: true },
     });
   });
 

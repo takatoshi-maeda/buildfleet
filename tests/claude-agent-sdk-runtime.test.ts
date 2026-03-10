@@ -108,6 +108,7 @@ describe("ClaudeAgentSdkRuntime", () => {
       allowedTools: ["Bash", "Read"],
       maxTurns: 20,
       includePartialMessages: true,
+      settings: { autoMemoryEnabled: false },
       settingSources: [],
       tools: { type: "preset", preset: "claude_code" },
     });
@@ -187,6 +188,28 @@ describe("ClaudeAgentSdkRuntime", () => {
     expect(client.calls[0]?.options).toMatchObject({
       permissionMode: "bypassPermissions",
       allowDangerouslySkipPermissions: true,
+      settings: { autoMemoryEnabled: false },
+    });
+  });
+
+  it("allows runtimeConfig.settings to override the auto-memory default", async () => {
+    const client = new FakeClaudeAgentSdkClient();
+    const runtime = new ClaudeAgentSdkRuntime(client);
+
+    await runtime.execute({
+      agentId: "orchestrator-1",
+      role: "Orchestrator",
+      cwd: "/workspace",
+      prompt: "Handle the event",
+      runtimeConfig: {
+        settings: {
+          autoMemoryEnabled: true,
+        },
+      },
+    });
+
+    expect(client.calls[0]?.options).toMatchObject({
+      settings: { autoMemoryEnabled: true },
     });
   });
 

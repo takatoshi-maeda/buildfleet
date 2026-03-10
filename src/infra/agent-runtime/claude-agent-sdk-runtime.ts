@@ -16,6 +16,7 @@ import { DefaultClaudeAgentSdkClient, type ClaudeAgentSdkClient } from "./claude
 const SUPPORTED_PERMISSION_MODES = ["default", "acceptEdits", "bypassPermissions", "plan", "dontAsk"] as const;
 const SUPPORTED_SETTING_SOURCES = ["user", "project", "local"] as const;
 const DEFAULT_CLAUDE_PERMISSION_MODE = "bypassPermissions" as const;
+const DEFAULT_CLAUDE_AUTO_MEMORY_ENABLED = false;
 
 export class ClaudeAgentSdkRuntime implements RoleAgentRuntime {
   readonly provider = "claude-agent-sdk" as const;
@@ -253,6 +254,9 @@ function validateClaudeRuntimeConfig(runtimeConfig: Record<string, unknown>): vo
   if ("mcpServers" in runtimeConfig && !isRecord(runtimeConfig.mcpServers)) {
     throw new CodefleetError("ERR_VALIDATION", "Claude runtime mcpServers must be an object");
   }
+  if ("settings" in runtimeConfig && !isValidClaudeSettings(runtimeConfig.settings)) {
+    throw new CodefleetError("ERR_VALIDATION", "Claude runtime settings must be an object with supported Claude settings");
+  }
   if ("systemPrompt" in runtimeConfig && !isValidSystemPrompt(runtimeConfig.systemPrompt)) {
     throw new CodefleetError("ERR_VALIDATION", "Claude runtime systemPrompt must be a string or claude_code preset");
   }
@@ -280,6 +284,7 @@ function buildClaudeQueryOptions(input: ExecuteRoleAgentInput): ClaudeAgentSdkOp
     mcpServers: isRecord(input.runtimeConfig.mcpServers)
       ? (input.runtimeConfig.mcpServers as NonNullable<ClaudeAgentSdkOptions["mcpServers"]>)
       : undefined,
+    settings: buildClaudeSettings(input.runtimeConfig.settings),
     settingSources: isSettingSourceArray(input.runtimeConfig.settingSources) ? input.runtimeConfig.settingSources : [],
     pathToClaudeCodeExecutable: readOptionalString(input.runtimeConfig.pathToClaudeCodeExecutable),
     systemPrompt: buildSystemPrompt(input.runtimeConfig.systemPrompt, input.role, input.responseLanguage),
@@ -296,6 +301,19 @@ function buildClaudeQueryOptions(input: ExecuteRoleAgentInput): ClaudeAgentSdkOp
     options.allowDangerouslySkipPermissions = true;
   }
   return options;
+}
+
+function buildClaudeSettings(configuredSettings: unknown): ClaudeAgentSdkOptions["settings"] {
+  const baseSettings = isRecord(configuredSettings) ? configuredSettings : {};
+  return {
+    ...baseSettings,
+    // Keep Claude project auto-memory off by default for Codefleet so role
+    // memory is written to workspace-local artifacts instead of ~/.claude.
+    autoMemoryEnabled:
+      typeof baseSettings.autoMemoryEnabled === "boolean"
+        ? baseSettings.autoMemoryEnabled
+        : DEFAULT_CLAUDE_AUTO_MEMORY_ENABLED,
+  } as NonNullable<ClaudeAgentSdkOptions["settings"]>;
 }
 
 function buildSystemPrompt(
@@ -338,6 +356,16 @@ function buildTools(configuredTools: unknown): NonNullable<ClaudeAgentSdkOptions
     return { type: "preset", preset: "claude_code" };
   }
   return { type: "preset", preset: "claude_code" };
+}
+
+function isValidClaudeSettings(value: unknown): value is NonNullable<ClaudeAgentSdkOptions["settings"]> {
+  if (!isRecord(value)) {
+    return false;
+  }
+  if ("autoMemoryEnabled" in value && typeof value.autoMemoryEnabled !== "boolean") {
+    return false;
+  }
+  return true;
 }
 
 function readInvocationId(message: ClaudeAgentSdkMessage, fallback: string | null): string | null {
