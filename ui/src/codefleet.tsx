@@ -11,6 +11,9 @@ import { useOptionalStandaloneThemePreference } from './theme/StandaloneThemePre
 import { useCodefleetColors } from './theme/useCodefleetColors';
 
 const WIDE_BREAKPOINT = 768;
+const SCREEN_TABS = ['home', 'board'] as const;
+
+type ScreenTab = (typeof SCREEN_TABS)[number];
 
 type FleetPeerNode = {
   projectId: string;
@@ -55,6 +58,7 @@ export default function CodefleetScreen({
   const [fleetPeers, setFleetPeers] = useState<FleetPeerNode[]>([]);
   const [isPeerMenuOpen, setIsPeerMenuOpen] = useState(false);
   const [fleetEndpoint, setFleetEndpoint] = useState(() => normalizeEndpoint(endpointStore.get()));
+  const [activeTab, setActiveTab] = useState<ScreenTab>('board');
   const sessionSlide = useRef(new Animated.Value(isSessionOpen ? 0 : 1)).current;
   const previousSessionOpen = useRef(isSessionOpen);
 
@@ -119,6 +123,11 @@ export default function CodefleetScreen({
   }, [board.refreshBoard, fleetEndpoint, refreshFleetStatus]);
 
   useEffect(() => {
+    if (activeTab !== 'board') return;
+    void board.refreshBoard();
+  }, [activeTab, board.refreshBoard]);
+
+  useEffect(() => {
     if (!isWide || !hasSessionPane) {
       setIsSessionMounted(false);
       sessionSlide.setValue(1);
@@ -164,12 +173,13 @@ export default function CodefleetScreen({
   );
 
   const canSwitchPeer = fleetPeers.length > 0;
+  const isBoardTabActive = activeTab === 'board';
   const navigation = chrome?.renderNavigation?.({
     orientation: isWide ? 'vertical' : 'horizontal',
   });
 
   const headerTitle = (
-    <View style={styles.headerTitleArea}>
+    <View style={styles.headerIdentityArea}>
       <View style={styles.headerTitleRow}>
         {standaloneTheme ? (
           <Pressable
@@ -209,6 +219,31 @@ export default function CodefleetScreen({
             />
           ) : null}
         </Pressable>
+      </View>
+      <View style={styles.headerMenuRow}>
+        {SCREEN_TABS.map((tab) => {
+          const isActive = activeTab === tab;
+          return (
+            <Pressable
+              key={tab}
+              onPress={() => setActiveTab(tab)}
+              style={[
+                styles.headerMenuButton,
+                isActive && { borderBottomColor: colors.tint },
+              ]}
+              hitSlop={8}
+            >
+              <Text
+                style={[
+                  styles.headerMenuText,
+                  { color: isActive ? colors.tint : colors.mutedText },
+                ]}
+              >
+                {tab === 'home' ? 'Home' : 'Board'}
+              </Text>
+            </Pressable>
+          );
+        })}
       </View>
       {isPeerMenuOpen ? (
         <View
@@ -251,21 +286,23 @@ export default function CodefleetScreen({
             >
               {headerTitle}
               <View style={styles.headerActions}>
-                <Pressable
-                  onPress={() => {
-                    setHasDashboardUserPreference(true);
-                    setIsDashboardOpen((previous) => !previous);
-                  }}
-                  hitSlop={8}
-                  style={styles.actionButton}
-                >
-                  <Ionicons
-                    name={isDashboardOpen ? 'code-slash' : 'code-slash-outline'}
-                    size={20}
-                    color={colors.tint}
-                  />
-                </Pressable>
-                {hasSessionPane ? (
+                {isBoardTabActive ? (
+                  <Pressable
+                    onPress={() => {
+                      setHasDashboardUserPreference(true);
+                      setIsDashboardOpen((previous) => !previous);
+                    }}
+                    hitSlop={8}
+                    style={styles.actionButton}
+                  >
+                    <Ionicons
+                      name={isDashboardOpen ? 'code-slash' : 'code-slash-outline'}
+                      size={20}
+                      color={colors.tint}
+                    />
+                  </Pressable>
+                ) : null}
+                {isBoardTabActive && hasSessionPane ? (
                   <Pressable
                     onPress={() => setIsSessionOpen((value) => !value)}
                     hitSlop={8}
@@ -282,26 +319,30 @@ export default function CodefleetScreen({
             </View>
             <View style={styles.contentRow}>
               <View style={styles.boardContainer}>
-                <Board
-                  client={client}
-                  key={`board:${fleetEndpoint}`}
-                  epics={board.epics}
-                  itemsByEpicId={board.itemsByEpicId}
-                  isLoading={board.isLoading}
-                  errorMessage={board.errorMessage}
-                  showDashboard={isDashboardOpen}
-                  onCloseDashboard={() => {
-                    setHasDashboardUserPreference(true);
-                    setIsDashboardOpen(false);
-                  }}
-                  onBacklogChanged={board.refreshBoard}
-                  onDashboardActivityChange={(hasActiveAgents) => {
-                    if (hasDashboardUserPreference) return;
-                    setIsDashboardOpen(hasActiveAgents);
-                  }}
-                />
+                {isBoardTabActive ? (
+                  <Board
+                    client={client}
+                    key={`board:${fleetEndpoint}`}
+                    epics={board.epics}
+                    itemsByEpicId={board.itemsByEpicId}
+                    isLoading={board.isLoading}
+                    errorMessage={board.errorMessage}
+                    showDashboard={isDashboardOpen}
+                    onCloseDashboard={() => {
+                      setHasDashboardUserPreference(true);
+                      setIsDashboardOpen(false);
+                    }}
+                    onBacklogChanged={board.refreshBoard}
+                    onDashboardActivityChange={(hasActiveAgents) => {
+                      if (hasDashboardUserPreference) return;
+                      setIsDashboardOpen(hasActiveAgents);
+                    }}
+                  />
+                ) : (
+                  <View style={[styles.homeContainer, { backgroundColor: colors.background }]} />
+                )}
               </View>
-              {isSessionMounted ? (
+              {isBoardTabActive && isSessionMounted ? (
                 <Animated.View
                   style={[
                     styles.sessionContainer,
@@ -340,41 +381,47 @@ export default function CodefleetScreen({
           >
             {headerTitle}
             <View style={styles.headerActions}>
-              <Pressable
-                onPress={() => {
-                  setHasDashboardUserPreference(true);
-                  setIsDashboardOpen((previous) => !previous);
-                }}
-                hitSlop={8}
-                style={styles.actionButton}
-              >
-                <Ionicons
-                  name={isDashboardOpen ? 'code-slash' : 'code-slash-outline'}
-                  size={20}
-                  color={colors.tint}
-                />
-              </Pressable>
+              {isBoardTabActive ? (
+                <Pressable
+                  onPress={() => {
+                    setHasDashboardUserPreference(true);
+                    setIsDashboardOpen((previous) => !previous);
+                  }}
+                  hitSlop={8}
+                  style={styles.actionButton}
+                >
+                  <Ionicons
+                    name={isDashboardOpen ? 'code-slash' : 'code-slash-outline'}
+                    size={20}
+                    color={colors.tint}
+                  />
+                </Pressable>
+              ) : null}
             </View>
           </View>
           {navigation}
-          <Board
-            client={client}
-            key={`board:${fleetEndpoint}`}
-            epics={board.epics}
-            itemsByEpicId={board.itemsByEpicId}
-            isLoading={board.isLoading}
-            errorMessage={board.errorMessage}
-            showDashboard={isDashboardOpen}
-            onCloseDashboard={() => {
-              setHasDashboardUserPreference(true);
-              setIsDashboardOpen(false);
-            }}
-            onBacklogChanged={board.refreshBoard}
-            onDashboardActivityChange={(hasActiveAgents) => {
-              if (hasDashboardUserPreference) return;
-              setIsDashboardOpen(hasActiveAgents);
-            }}
-          />
+          {isBoardTabActive ? (
+            <Board
+              client={client}
+              key={`board:${fleetEndpoint}`}
+              epics={board.epics}
+              itemsByEpicId={board.itemsByEpicId}
+              isLoading={board.isLoading}
+              errorMessage={board.errorMessage}
+              showDashboard={isDashboardOpen}
+              onCloseDashboard={() => {
+                setHasDashboardUserPreference(true);
+                setIsDashboardOpen(false);
+              }}
+              onBacklogChanged={board.refreshBoard}
+              onDashboardActivityChange={(hasActiveAgents) => {
+                if (hasDashboardUserPreference) return;
+                setIsDashboardOpen(hasActiveAgents);
+              }}
+            />
+          ) : (
+            <View style={[styles.homeContainer, { backgroundColor: colors.background }]} />
+          )}
         </>
       )}
     </View>
@@ -401,9 +448,12 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '700',
   },
-  headerTitleArea: {
+  headerIdentityArea: {
     position: 'relative',
-    maxWidth: '70%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 18,
+    maxWidth: '80%',
     overflow: 'visible',
     zIndex: 60,
     elevation: 60,
@@ -417,6 +467,22 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
+  },
+  headerMenuRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+  },
+  headerMenuButton: {
+    minHeight: 28,
+    paddingBottom: 4,
+    borderBottomWidth: 2,
+    borderBottomColor: 'transparent',
+    justifyContent: 'center',
+  },
+  headerMenuText: {
+    fontSize: 14,
+    fontWeight: '600',
   },
   headerThemeButton: {
     width: 28,
@@ -448,6 +514,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
   },
   boardContainer: {
+    flex: 1,
+  },
+  homeContainer: {
     flex: 1,
   },
   sessionContainer: {
