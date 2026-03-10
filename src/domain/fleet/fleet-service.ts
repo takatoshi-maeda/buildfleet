@@ -38,11 +38,43 @@ const FIXED_ORCHESTRATOR_COUNT = 1;
 const FIXED_CURATOR_COUNT = 1;
 const LEGACY_APP_SERVER_SESSION_FILE = "app-server-sessions.json";
 const SUPPORTED_AGENT_PROVIDERS = ["codex-app-server", "claude-agent-sdk"] as const;
+const DEFAULT_CLAUDE_AGENT_SDK_PERMISSION_MODE = "bypassPermissions" as const;
 
 interface ResolvedRoleRuntimeConfig {
   provider: AgentProviderId | "claude-agent-sdk";
   config: Record<string, unknown>;
 }
+
+const BUILTIN_ROLE_RUNTIME_DEFAULTS: Record<AgentRole, ResolvedRoleRuntimeConfig> = {
+  Orchestrator: {
+    provider: "claude-agent-sdk",
+    config: { model: "claude-opus-4-6", permissionMode: DEFAULT_CLAUDE_AGENT_SDK_PERMISSION_MODE },
+  },
+  Curator: {
+    provider: "claude-agent-sdk",
+    config: { model: "claude-opus-4-6", permissionMode: DEFAULT_CLAUDE_AGENT_SDK_PERMISSION_MODE },
+  },
+  FrontendDeveloper: {
+    provider: "claude-agent-sdk",
+    config: { model: "claude-opus-4-6", permissionMode: DEFAULT_CLAUDE_AGENT_SDK_PERMISSION_MODE },
+  },
+  Developer: {
+    provider: "codex-app-server",
+    config: { model: "gpt-5.4" },
+  },
+  Polisher: {
+    provider: "codex-app-server",
+    config: { model: "gpt-5.4" },
+  },
+  Gatekeeper: {
+    provider: "codex-app-server",
+    config: { model: "gpt-5.4" },
+  },
+  Reviewer: {
+    provider: "codex-app-server",
+    config: { model: "gpt-5.4" },
+  },
+};
 
 export interface FleetStatus {
   summary: "running" | "stopped" | "degraded";
@@ -926,20 +958,9 @@ function resolveRoleRuntimeConfig(
     return parseConfiguredRuntime(defaultConfig, "config.agentRuntime.default");
   }
 
-  if (config && "codex" in config && config.codex !== undefined) {
-    if (!isRecord(config.codex)) {
-      throw new CodefleetError("ERR_VALIDATION", "config.codex must be a JSON object");
-    }
-    return {
-      provider: "codex-app-server",
-      config: config.codex,
-    };
-  }
-
-  return {
-    provider: "codex-app-server",
-    config: {},
-  };
+  // Built-in role defaults keep runtime selection deterministic even when no
+  // repository config exists yet.
+  return cloneResolvedRoleRuntimeConfig(BUILTIN_ROLE_RUNTIME_DEFAULTS[role]);
 }
 
 function parseConfiguredRuntime(value: Record<string, unknown>, label: string): ResolvedRoleRuntimeConfig {
@@ -956,7 +977,22 @@ function parseConfiguredRuntime(value: Record<string, unknown>, label: string): 
   }
   return {
     provider,
-    config: runtimeConfig ?? {},
+    // Mirror Claude runtime execution defaults in persisted fleet config so
+    // status/log output describes the behavior that will actually occur.
+    config: applyProviderRuntimeDefaults(provider, runtimeConfig ?? {}),
+  };
+}
+
+function applyProviderRuntimeDefaults(
+  provider: AgentProviderId | "claude-agent-sdk",
+  runtimeConfig: Record<string, unknown>,
+): Record<string, unknown> {
+  if (provider !== "claude-agent-sdk" || "permissionMode" in runtimeConfig) {
+    return runtimeConfig;
+  }
+  return {
+    ...runtimeConfig,
+    permissionMode: DEFAULT_CLAUDE_AGENT_SDK_PERMISSION_MODE,
   };
 }
 
@@ -1039,6 +1075,13 @@ function cloneRuntimeOptions(runtimeOptions: Record<string, unknown>): Record<st
   // Persist the exact startup/runtime choice used for this agent so later
   // config edits do not obscure which provider/options the logs refer to.
   return JSON.parse(JSON.stringify(runtimeOptions)) as Record<string, unknown>;
+}
+
+function cloneResolvedRoleRuntimeConfig(runtime: ResolvedRoleRuntimeConfig): ResolvedRoleRuntimeConfig {
+  return {
+    provider: runtime.provider,
+    config: cloneRuntimeOptions(runtime.config),
+  };
 }
 
 function expectNonEmptyString(value: unknown, label: string): string {

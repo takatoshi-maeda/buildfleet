@@ -228,6 +228,30 @@ class FakeApiServerLifecycle implements FleetApiServerLifecycle {
   }
 }
 
+async function writeRoleRuntimeConfig(
+  rootDir: string,
+  roles: Partial<Record<AgentRole, { provider: "codex-app-server" | "claude-agent-sdk"; config?: Record<string, unknown> }>>,
+): Promise<void> {
+  const configPath = path.join(rootDir, ".codefleet/config.json");
+  await fs.mkdir(path.dirname(configPath), { recursive: true });
+  await fs.writeFile(
+    configPath,
+    JSON.stringify(
+      {
+        lang: "ja",
+        docsRepository: "https://example.com/spec.git",
+        agentRuntime: {
+          roles,
+        },
+        hooks: {},
+      },
+      null,
+      2,
+    ),
+    "utf8",
+  );
+}
+
 describe("FleetService", () => {
   it("raises a diagnostic error when API server startup fails", async () => {
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codefleet-fleet-"));
@@ -334,13 +358,20 @@ describe("FleetService", () => {
     expect(upStatus.summary).toBe("running");
     expect(upStatus.agents).toHaveLength(7);
     expect(upStatus.agents.every((agent) => agent.status === "running")).toBe(true);
-    expect(upStatus.agents.every((agent) => agent.provider === "codex-app-server")).toBe(true);
+    expect(upStatus.agents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "orchestrator-1", provider: "claude-agent-sdk" }),
+        expect.objectContaining({ id: "curator-1", provider: "claude-agent-sdk" }),
+        expect.objectContaining({ id: "frontend-developer-1", provider: "claude-agent-sdk" }),
+        expect.objectContaining({ id: "gatekeeper-1", provider: "codex-app-server" }),
+        expect.objectContaining({ id: "developer-1", provider: "codex-app-server" }),
+        expect.objectContaining({ id: "polisher-1", provider: "codex-app-server" }),
+        expect.objectContaining({ id: "reviewer-1", provider: "codex-app-server" }),
+      ]),
+    );
     expect(upStatus.sessions.every((session) => session.status === "ready")).toBe(true);
     expect(appServer.started).toEqual([
-      expect.objectContaining({ agentId: "orchestrator-1", role: "Orchestrator", detached: false }),
-      expect.objectContaining({ agentId: "curator-1", role: "Curator", detached: false }),
       expect.objectContaining({ agentId: "gatekeeper-1", role: "Gatekeeper", detached: false }),
-      expect.objectContaining({ agentId: "frontend-developer-1", role: "FrontendDeveloper", detached: false }),
       expect.objectContaining({ agentId: "developer-1", role: "Developer", detached: false }),
       expect.objectContaining({ agentId: "polisher-1", role: "Polisher", detached: false }),
       expect.objectContaining({ agentId: "reviewer-1", role: "Reviewer", detached: false }),
@@ -354,13 +385,10 @@ describe("FleetService", () => {
     expect(downStatus.sessions).toHaveLength(7);
     expect(downStatus.sessions.every((session) => session.status === "disconnected")).toBe(true);
     expect(processManager.stopped.length).toBe(7);
-    expect(processManager.stopped).toEqual([12345, 12345, 12345, 12345, 12345, 12345, 12345]);
+    expect(processManager.stopped).toEqual([null, null, 12345, null, 12345, 12345, 12345]);
     expect(appServer.shutdowns.sort()).toEqual([
-      "curator-1",
       "developer-1",
-      "frontend-developer-1",
       "gatekeeper-1",
-      "orchestrator-1",
       "polisher-1",
       "reviewer-1",
     ]);
@@ -373,6 +401,12 @@ describe("FleetService", () => {
     const logDir = path.join(tempDir, ".codefleet/logs/agents");
 
     const runtime = new FakeRoleAgentRuntime();
+    const resolver = new FakeAgentRuntimeResolver(
+      new Map([
+        ["codex-app-server", runtime],
+        ["claude-agent-sdk", runtime],
+      ]),
+    );
     const appServer = new FakeAppServerClient();
     const processManager = new FakeProcessManager();
     const service = new FleetService(
@@ -384,7 +418,7 @@ describe("FleetService", () => {
       undefined,
       undefined,
       undefined,
-      runtime,
+      resolver,
     );
 
     await service.up({ reviewers: 0, polishers: 0, developers: 0, frontendDevelopers: 0, gatekeepers: 0 });
@@ -454,6 +488,9 @@ describe("FleetService", () => {
     const rolesPath = path.join(tempDir, ".codefleet/roles.json");
     const runtimeDir = path.join(tempDir, ".codefleet/runtime");
     const logDir = path.join(tempDir, ".codefleet/logs/agents");
+    await writeRoleRuntimeConfig(tempDir, {
+      Curator: { provider: "codex-app-server", config: {} },
+    });
     const appServer = new FakeAppServerClient();
     const service = new FleetService(
       rolesPath,
@@ -511,6 +548,14 @@ describe("FleetService", () => {
         {
           lang: "日本語",
           docsRepository: "https://example.com/spec.git",
+          agentRuntime: {
+            roles: {
+              Curator: {
+                provider: "codex-app-server",
+                config: {},
+              },
+            },
+          },
           hooks: {},
         },
         null,
@@ -543,59 +588,59 @@ describe("FleetService", () => {
     ]);
   });
 
-  it("passes .codefleet/config.json codex settings into AppServer startup and thread creation", async () => {
+  it("uses built-in role runtime defaults when config omits agentRuntime", async () => {
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codefleet-fleet-"));
     const rolesPath = path.join(tempDir, ".codefleet/roles.json");
     const runtimeDir = path.join(tempDir, ".codefleet/runtime");
     const logDir = path.join(tempDir, ".codefleet/logs/agents");
-    const configPath = path.join(tempDir, ".codefleet/config.json");
-    await fs.mkdir(path.dirname(configPath), { recursive: true });
-    await fs.writeFile(
-      configPath,
-      JSON.stringify(
-        {
-          lang: "ja",
-          docsRepository: "https://example.com/spec.git",
-          codex: {
-            model: "gpt-5-mini-codex",
-            model_reasoning_effort: "medium",
-          },
-          hooks: {},
-        },
-        null,
-        2,
-      ),
-      "utf8",
+    const codexRuntime = new FakeRoleAgentRuntime();
+    const claudeRuntime = new FakeRoleAgentRuntime();
+    Object.defineProperty(claudeRuntime, "provider", {
+      value: "claude-agent-sdk",
+    });
+    const resolver = new FakeAgentRuntimeResolver(
+      new Map([
+        ["codex-app-server", codexRuntime],
+        ["claude-agent-sdk", claudeRuntime],
+      ]),
     );
-
-    const appServer = new FakeAppServerClient();
     const service = new FleetService(
       rolesPath,
       runtimeDir,
       logDir,
       new FakeProcessManager() as never,
-      appServer as never,
+      new FakeAppServerClient() as never,
+      undefined,
+      undefined,
+      undefined,
+      resolver,
     );
 
     await service.up();
-    expect(appServer.started[0]?.codexConfig).toEqual({
-      model: "gpt-5-mini-codex",
-      model_reasoning_effort: "medium",
-    });
+    expect(claudeRuntime.prepared.map((entry) => [entry.agentId, entry.runtimeConfig])).toEqual([
+      ["orchestrator-1", { model: "claude-opus-4-6", permissionMode: "bypassPermissions" }],
+      ["curator-1", { model: "claude-opus-4-6", permissionMode: "bypassPermissions" }],
+      ["frontend-developer-1", { model: "claude-opus-4-6", permissionMode: "bypassPermissions" }],
+    ]);
+    expect(codexRuntime.prepared.map((entry) => [entry.agentId, entry.runtimeConfig])).toEqual([
+      ["gatekeeper-1", { model: "gpt-5.4" }],
+      ["developer-1", { model: "gpt-5.4" }],
+      ["polisher-1", { model: "gpt-5.4" }],
+      ["reviewer-1", { model: "gpt-5.4" }],
+    ]);
 
-    await service.dispatchAgentEvent({
-      agentId: "curator-1",
-      agentRole: "Curator",
-      event: { type: "docs.update", paths: ["docs/spec.md"] },
+    const status = await service.status();
+    expect(status.agents.find((agent) => agent.id === "orchestrator-1")).toMatchObject({
+      provider: "claude-agent-sdk",
+      runtimeOptions: { model: "claude-opus-4-6", permissionMode: "bypassPermissions" },
     });
-
-    expect(appServer.startedThreads[0]?.codexConfig).toEqual({
-      model: "gpt-5-mini-codex",
-      model_reasoning_effort: "medium",
+    expect(status.agents.find((agent) => agent.id === "developer-1")).toMatchObject({
+      provider: "codex-app-server",
+      runtimeOptions: { model: "gpt-5.4" },
     });
   });
 
-  it("resolves role-specific agentRuntime config before legacy codex defaults", async () => {
+  it("resolves role-specific agentRuntime config before configured agentRuntime.default", async () => {
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codefleet-fleet-"));
     const rolesPath = path.join(tempDir, ".codefleet/roles.json");
     const runtimeDir = path.join(tempDir, ".codefleet/runtime");
@@ -619,9 +664,6 @@ describe("FleetService", () => {
                 config: { model: "gpt-curator-codex", model_reasoning_effort: "low" },
               },
             },
-          },
-          codex: {
-            model: "legacy-codex-should-not-win",
           },
           hooks: {},
         },
@@ -660,6 +702,72 @@ describe("FleetService", () => {
       model_reasoning_effort: "low",
     });
     expect((await service.status("Curator")).agents[0]?.provider).toBe("codex-app-server");
+  });
+
+  it("falls back to built-in role defaults for roles omitted from agentRuntime.roles", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codefleet-fleet-"));
+    const rolesPath = path.join(tempDir, ".codefleet/roles.json");
+    const runtimeDir = path.join(tempDir, ".codefleet/runtime");
+    const logDir = path.join(tempDir, ".codefleet/logs/agents");
+    const configPath = path.join(tempDir, ".codefleet/config.json");
+    await fs.mkdir(path.dirname(configPath), { recursive: true });
+    await fs.writeFile(
+      configPath,
+      JSON.stringify(
+        {
+          lang: "ja",
+          docsRepository: "https://example.com/spec.git",
+          agentRuntime: {
+            roles: {
+              Curator: {
+                provider: "codex-app-server",
+                config: { model: "gpt-curator-codex" },
+              },
+            },
+          },
+          hooks: {},
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+
+    const codexRuntime = new FakeRoleAgentRuntime();
+    const claudeRuntime = new FakeRoleAgentRuntime();
+    Object.defineProperty(claudeRuntime, "provider", {
+      value: "claude-agent-sdk",
+    });
+    const resolver = new FakeAgentRuntimeResolver(
+      new Map([
+        ["codex-app-server", codexRuntime],
+        ["claude-agent-sdk", claudeRuntime],
+      ]),
+    );
+
+    const service = new FleetService(
+      rolesPath,
+      runtimeDir,
+      logDir,
+      new FakeProcessManager() as never,
+      new FakeAppServerClient() as never,
+      undefined,
+      undefined,
+      undefined,
+      resolver,
+    );
+
+    await service.up();
+    expect(codexRuntime.prepared.find((entry) => entry.agentId === "curator-1")?.runtimeConfig).toEqual({
+      model: "gpt-curator-codex",
+    });
+    expect(claudeRuntime.prepared.find((entry) => entry.agentId === "orchestrator-1")?.runtimeConfig).toEqual({
+      model: "claude-opus-4-6",
+      permissionMode: "bypassPermissions",
+    });
+    expect(codexRuntime.prepared.find((entry) => entry.agentId === "developer-1")?.runtimeConfig).toEqual({
+      model: "gpt-5.4",
+    });
   });
 
   it("migrates legacy runtime and app-server session state into provider-neutral models", async () => {
@@ -820,11 +928,62 @@ describe("FleetService", () => {
     expect(status.sessions.find((session) => session.agentId === "orchestrator-1")?.provider).toBe("claude-agent-sdk");
   });
 
+  it("applies bypassPermissions by default for claude-agent-sdk role configs", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codefleet-fleet-"));
+    const rolesPath = path.join(tempDir, ".codefleet/roles.json");
+    const runtimeDir = path.join(tempDir, ".codefleet/runtime");
+    const logDir = path.join(tempDir, ".codefleet/logs/agents");
+    await writeRoleRuntimeConfig(tempDir, {
+      Orchestrator: { provider: "claude-agent-sdk", config: { model: "claude-sonnet-4-5", persistSession: false } },
+    });
+
+    const claudeRuntime = new FakeRoleAgentRuntime();
+    Object.defineProperty(claudeRuntime, "provider", {
+      value: "claude-agent-sdk",
+    });
+    const resolver = new FakeAgentRuntimeResolver(
+      new Map([
+        ["codex-app-server", new FakeRoleAgentRuntime()],
+        ["claude-agent-sdk", claudeRuntime],
+      ]),
+    );
+
+    const service = new FleetService(
+      rolesPath,
+      runtimeDir,
+      logDir,
+      new FakeProcessManager() as never,
+      new FakeAppServerClient() as never,
+      undefined,
+      undefined,
+      undefined,
+      resolver,
+    );
+
+    await service.up({ gatekeepers: 0, developers: 0, frontendDevelopers: 0, polishers: 0, reviewers: 0 });
+
+    expect(claudeRuntime.prepared[0]?.runtimeConfig).toEqual({
+      model: "claude-sonnet-4-5",
+      permissionMode: "bypassPermissions",
+      persistSession: false,
+    });
+
+    const status = await service.status("Orchestrator");
+    expect(status.agents[0]?.runtimeOptions).toEqual({
+      model: "claude-sonnet-4-5",
+      permissionMode: "bypassPermissions",
+      persistSession: false,
+    });
+  });
+
   it("emits acceptance-test.update after gatekeeper handles source-brief.update", async () => {
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codefleet-fleet-"));
     const rolesPath = path.join(tempDir, ".codefleet/roles.json");
     const runtimeDir = path.join(tempDir, ".codefleet/runtime");
     const logDir = path.join(tempDir, ".codefleet/logs/agents");
+    await writeRoleRuntimeConfig(tempDir, {
+      Gatekeeper: { provider: "codex-app-server", config: {} },
+    });
     const appServer = new FakeAppServerClient();
     const service = new FleetService(
       rolesPath,
@@ -879,6 +1038,9 @@ describe("FleetService", () => {
     const rolesPath = path.join(tempDir, ".codefleet/roles.json");
     const runtimeDir = path.join(tempDir, ".codefleet/runtime");
     const logDir = path.join(tempDir, ".codefleet/logs/agents");
+    await writeRoleRuntimeConfig(tempDir, {
+      FrontendDeveloper: { provider: "codex-app-server", config: {} },
+    });
     const appServer = new FakeAppServerClient();
     const service = new FleetService(
       rolesPath,
@@ -983,6 +1145,9 @@ describe("FleetService", () => {
     const rolesPath = path.join(tempDir, ".codefleet/roles.json");
     const runtimeDir = path.join(tempDir, ".codefleet/runtime");
     const logDir = path.join(tempDir, ".codefleet/logs/agents");
+    await writeRoleRuntimeConfig(tempDir, {
+      Gatekeeper: { provider: "codex-app-server", config: {} },
+    });
     const appServer = new FakeAppServerClient();
     const service = new FleetService(
       rolesPath,
@@ -1033,6 +1198,9 @@ describe("FleetService", () => {
     const rolesPath = path.join(tempDir, ".codefleet/roles.json");
     const runtimeDir = path.join(tempDir, ".codefleet/runtime");
     const logDir = path.join(tempDir, ".codefleet/logs/agents");
+    await writeRoleRuntimeConfig(tempDir, {
+      Orchestrator: { provider: "codex-app-server", config: {} },
+    });
     const appServer = new FakeAppServerClient();
     const service = new FleetService(
       rolesPath,

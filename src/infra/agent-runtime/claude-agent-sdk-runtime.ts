@@ -15,6 +15,7 @@ import { DefaultClaudeAgentSdkClient, type ClaudeAgentSdkClient } from "./claude
 
 const SUPPORTED_PERMISSION_MODES = ["default", "acceptEdits", "bypassPermissions", "plan", "dontAsk"] as const;
 const SUPPORTED_SETTING_SOURCES = ["user", "project", "local"] as const;
+const DEFAULT_CLAUDE_PERMISSION_MODE = "bypassPermissions" as const;
 
 export class ClaudeAgentSdkRuntime implements RoleAgentRuntime {
   readonly provider = "claude-agent-sdk" as const;
@@ -262,14 +263,17 @@ function validateClaudeRuntimeConfig(runtimeConfig: Record<string, unknown>): vo
 
 function buildClaudeQueryOptions(input: ExecuteRoleAgentInput): ClaudeAgentSdkOptions {
   validateClaudeRuntimeConfig(input.runtimeConfig);
+  const permissionMode = isSupportedPermissionMode(input.runtimeConfig.permissionMode)
+    ? input.runtimeConfig.permissionMode
+    : DEFAULT_CLAUDE_PERMISSION_MODE;
   const persistSession = input.runtimeConfig.persistSession === true;
   const options: ClaudeAgentSdkOptions = {
     cwd: input.cwd,
     includePartialMessages: input.runtimeConfig.includePartialMessages !== false,
     model: readOptionalString(input.runtimeConfig.model),
-    permissionMode: isSupportedPermissionMode(input.runtimeConfig.permissionMode)
-      ? input.runtimeConfig.permissionMode
-      : undefined,
+    // Keep Codefleet's observed runtime options aligned with the actual SDK
+    // behavior by applying the default permission mode centrally here.
+    permissionMode,
     allowedTools: isStringArray(input.runtimeConfig.allowedTools) ? input.runtimeConfig.allowedTools : undefined,
     disallowedTools: isStringArray(input.runtimeConfig.disallowedTools) ? input.runtimeConfig.disallowedTools : undefined,
     maxTurns: typeof input.runtimeConfig.maxTurns === "number" ? input.runtimeConfig.maxTurns : undefined,

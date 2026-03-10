@@ -172,6 +172,24 @@ describe("ClaudeAgentSdkRuntime", () => {
     });
   });
 
+  it("defaults permissionMode to bypassPermissions when omitted", async () => {
+    const client = new FakeClaudeAgentSdkClient();
+    const runtime = new ClaudeAgentSdkRuntime(client);
+
+    await runtime.execute({
+      agentId: "orchestrator-1",
+      role: "Orchestrator",
+      cwd: "/workspace",
+      prompt: "Handle the event",
+      runtimeConfig: {},
+    });
+
+    expect(client.calls[0]?.options).toMatchObject({
+      permissionMode: "bypassPermissions",
+      allowDangerouslySkipPermissions: true,
+    });
+  });
+
   it("emits Claude thinking and tool-use progress when partial messages are enabled", async () => {
     const captured: string[] = [];
     const client: ClaudeAgentSdkClient = {
