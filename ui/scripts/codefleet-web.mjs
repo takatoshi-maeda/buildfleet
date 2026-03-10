@@ -44,6 +44,7 @@ Options:
   --codefleet-api-base-url <url>  Base URL baked into the exported web bundle.
   --host <host>                   Host to bind the web server to. Default: 127.0.0.1
   --port <port>                   Port to bind the web server to. Default: 8080
+  --rebuild                       Force a fresh web build before serving.
   --help                          Show this help message.
 `);
 }
@@ -53,6 +54,7 @@ function parseArgs(argv) {
     host: '127.0.0.1',
     port: 8080,
     codefleetApiBaseUrl: null,
+    rebuild: false,
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -79,6 +81,10 @@ function parseArgs(argv) {
       }
       options.port = parsedPort;
       index += 1;
+      continue;
+    }
+    if (argument === '--rebuild') {
+      options.rebuild = true;
       continue;
     }
     throw new Error(`Unknown argument: ${argument}`);
@@ -346,10 +352,14 @@ async function main() {
   const uiHeadTreeHash = await resolveUiHeadTreeHash();
 
   // Reuse only when the baked API base URL and the committed ui/ tree snapshot are unchanged.
-  if (await hasReusableBuild({ baseUrl: normalizedBaseUrl, uiHeadTreeHash })) {
+  if (!options.rebuild && (await hasReusableBuild({ baseUrl: normalizedBaseUrl, uiHeadTreeHash }))) {
     console.log(`Reusing existing web build in ${distDir}`);
   } else {
-    console.log(`Building web bundle into ${distDir}`);
+    console.log(
+      options.rebuild
+        ? `Rebuilding web bundle into ${distDir}`
+        : `Building web bundle into ${distDir}`,
+    );
     await exportWebBundle({ baseUrl: normalizedBaseUrl, uiHeadTreeHash });
   }
   await startStaticServer(options);
