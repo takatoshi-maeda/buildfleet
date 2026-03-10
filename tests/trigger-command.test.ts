@@ -49,6 +49,8 @@ describe("trigger command", () => {
     expect(output).toContain("acceptance-test.required");
     expect(output).toContain("backlog.update");
     expect(output).toContain("backlog.epic.ready");
+    expect(output).toContain("backlog.epic.frontend.ready");
+    expect(output).toContain("backlog.epic.frontend.completed");
     expect(output).toContain("backlog.epic.polish.ready");
     expect(output).toContain("backlog.epic.review.ready");
     expect(output).toContain("debug.playwright-test");
@@ -214,6 +216,37 @@ describe("trigger command", () => {
 
     expect(router.events).toEqual([{ type: "backlog.epic.ready", epicId: "E-123" }]);
     expect(queue.events).toEqual([{ type: "backlog.epic.ready", epicId: "E-123" }]);
+    expect(logSpy).toHaveBeenCalled();
+  });
+
+  it("builds backlog.epic.frontend.ready event with --epic-id", async () => {
+    const router = new RecordingRouter();
+    const queue = new RecordingQueue();
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    await createTriggerCommand({ router, queue }).parseAsync(["backlog.epic.frontend.ready", "--epic-id", "E-123"], {
+      from: "user",
+    });
+
+    expect(router.events).toEqual([{ type: "backlog.epic.frontend.ready", epicId: "E-123" }]);
+    expect(queue.events).toEqual([{ type: "backlog.epic.frontend.ready", epicId: "E-123" }]);
+    expect(logSpy).toHaveBeenCalled();
+  });
+
+  it("builds backlog.epic.frontend.completed event with --epic-id", async () => {
+    const router = new RecordingRouter();
+    const queue = new RecordingQueue();
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    await createTriggerCommand({ router, queue }).parseAsync(
+      ["backlog.epic.frontend.completed", "--epic-id", "E-123"],
+      {
+        from: "user",
+      },
+    );
+
+    expect(router.events).toEqual([{ type: "backlog.epic.frontend.completed", epicId: "E-123" }]);
+    expect(queue.events).toEqual([{ type: "backlog.epic.frontend.completed", epicId: "E-123" }]);
     expect(logSpy).toHaveBeenCalled();
   });
 

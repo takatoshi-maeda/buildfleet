@@ -267,6 +267,7 @@ export function createFleetctlCommand(options: FleetctlCommandOptions = {}): Com
     .option("--playwright-host <host>", "Host to bind playwright run-server", DEFAULT_PLAYWRIGHT_HOST)
     .option("--playwright-port <port>", "Port to bind playwright run-server", String(DEFAULT_PLAYWRIGHT_PORT))
     .option("--gatekeepers <count>", "Number of Gatekeeper agents", "1")
+    .option("--frontend-developers <count>", "Number of FrontendDeveloper agents", "1")
     .option("--developers <count>", "Number of Developer agents", "1")
     .option("--polishers <count>", "Number of Polisher agents", "1")
     .option("--reviewers <count>", "Number of Reviewer agents", "1")
@@ -279,6 +280,7 @@ export function createFleetctlCommand(options: FleetctlCommandOptions = {}): Com
       debugAppServerEvents = DEBUG_APP_SERVER_EVENTS_ENV_ENABLED || Boolean(options.debugAppServerEvents);
       const requestedAt = new Date().toISOString();
       const gatekeepers = Number(options.gatekeepers);
+      const frontendDevelopers = Number(options.frontendDevelopers);
       const developers = Number(options.developers);
       const polishers = Number(options.polishers);
       const reviewers = Number(options.reviewers);
@@ -345,6 +347,7 @@ export function createFleetctlCommand(options: FleetctlCommandOptions = {}): Com
       if (Boolean(options.detached)) {
         const detachedPid = await spawnDetachedAgentRuntimeManagerProcess({
           gatekeepers,
+          frontendDevelopers,
           developers,
           polishers,
           reviewers,
@@ -365,6 +368,7 @@ export function createFleetctlCommand(options: FleetctlCommandOptions = {}): Com
           requestedRoles: {
             orchestrators: 1,
             gatekeepers,
+            frontendDevelopers,
             developers,
             polishers,
             reviewers,
@@ -381,6 +385,7 @@ export function createFleetctlCommand(options: FleetctlCommandOptions = {}): Com
         requestedRoles: {
           orchestrators: 1,
           gatekeepers,
+          frontendDevelopers,
           developers,
           polishers,
           reviewers,
@@ -410,6 +415,7 @@ export function createFleetctlCommand(options: FleetctlCommandOptions = {}): Com
       const status = await service.up({
         detached: false,
         gatekeepers,
+        frontendDevelopers,
         developers,
         polishers,
         reviewers,
@@ -484,6 +490,7 @@ export function createFleetctlCommand(options: FleetctlCommandOptions = {}): Com
     .description("Restart agents")
     .option("-d, --detached", "Run in background")
     .option("--gatekeepers <count>", "Number of Gatekeeper agents", "1")
+    .option("--frontend-developers <count>", "Number of FrontendDeveloper agents", "1")
     .option("--developers <count>", "Number of Developer agents", "1")
     .option("--polishers <count>", "Number of Polisher agents", "1")
     .option("--reviewers <count>", "Number of Reviewer agents", "1")
@@ -491,6 +498,7 @@ export function createFleetctlCommand(options: FleetctlCommandOptions = {}): Com
       const status = await service.restart({
         detached: Boolean(options.detached),
         gatekeepers: Number(options.gatekeepers),
+        frontendDevelopers: Number(options.frontendDevelopers),
         developers: Number(options.developers),
         polishers: Number(options.polishers),
         reviewers: Number(options.reviewers),
@@ -1442,31 +1450,25 @@ function exitCodeForSignal(signal: NodeJS.Signals): number {
 
 async function prepareDispatchMessage(
   message: AgentEventQueueMessage,
-  backlogService: Pick<BacklogService, "claimReadyEpicForImplementation">,
+  backlogService: Pick<BacklogService, "claimEpicForImplementation">,
 ): Promise<AgentEventQueueMessage | null> {
-  if (message.event.type !== "backlog.epic.ready") {
+  if (message.event.type !== "backlog.epic.ready" && message.event.type !== "backlog.epic.frontend.ready") {
     return message;
   }
 
-  if (message.event.epicId) {
-    // Explicit epic dispatch is used by review-requested rework. Skip auto-claiming.
+  if (!message.event.epicId) {
     return message;
   }
 
   // Claiming at consume-time keeps enqueue cheap and avoids losing epics when
   // queued messages fail before an agent actually starts handling the task.
-  const claimed = await backlogService.claimReadyEpicForImplementation(message.agentId);
+  const claimed = await backlogService.claimEpicForImplementation(message.event.epicId, message.agentId);
   if (!claimed) {
     return null;
   }
-
-  const event: SystemEvent = {
-    type: "backlog.epic.ready",
-    epicId: claimed.id,
-  };
   return {
     ...message,
-    event,
+    event: { ...message.event, epicId: claimed.id },
   };
 }
 
@@ -1476,13 +1478,16 @@ async function finalizeEpicExecutionStatus(
   actorId: string,
   error: unknown,
 ): Promise<void> {
-  if (message.event.type !== "backlog.epic.ready" || !message.event.epicId) {
+  if (
+    (message.event.type !== "backlog.epic.ready" && message.event.type !== "backlog.epic.frontend.ready") ||
+    !message.event.epicId
+  ) {
     return;
   }
 
   await backlogService.updateEpic({
     id: message.event.epicId,
-    status: error ? "failed" : "in-review",
+    status: error ? "failed" : message.event.type === "backlog.epic.frontend.ready" ? "in-progress" : "in-review",
     force: true,
     actorId,
   });
@@ -1491,6 +1496,8 @@ async function finalizeEpicExecutionStatus(
 function isEpicScopedEvent(event: SystemEvent): event is Extract<SystemEvent, { epicId: string }> {
   return (
     (event.type === "backlog.epic.ready" ||
+      event.type === "backlog.epic.frontend.ready" ||
+      event.type === "backlog.epic.frontend.completed" ||
       event.type === "backlog.epic.polish.ready" ||
       event.type === "backlog.epic.review.ready") &&
     typeof event.epicId === "string" &&
@@ -1881,6 +1888,7 @@ async function spawnDetachedAgentRuntimeManagerProcess(input: {
   docsUpdatePullIntervalMs: number;
   playwrightHost: string;
   playwrightPort: number;
+  frontendDevelopers: number;
 }): Promise<number | null> {
   const args = [
     ...process.execArgv,
@@ -1888,6 +1896,8 @@ async function spawnDetachedAgentRuntimeManagerProcess(input: {
     "up",
     "--gatekeepers",
     String(input.gatekeepers),
+    "--frontend-developers",
+    String(input.frontendDevelopers),
     "--developers",
     String(input.developers),
     "--polishers",

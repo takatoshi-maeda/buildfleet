@@ -17,7 +17,7 @@
           "id": { "type": "string", "minLength": 1 },
           "role": {
             "type": "string",
-            "enum": ["Orchestrator", "Curator", "Developer", "Polisher", "Gatekeeper", "Reviewer"]
+            "enum": ["Orchestrator", "Curator", "FrontendDeveloper", "Developer", "Polisher", "Gatekeeper", "Reviewer"]
           },
           "provider": { "type": "string", "enum": ["codex-app-server", "claude-agent-sdk"] },
           "runtimeOptions": {

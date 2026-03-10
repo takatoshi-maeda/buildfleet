@@ -47,7 +47,14 @@ type RawBacklogItems = Omit<BacklogItems, "epics" | "items"> & {
   items: RawBacklogItem[];
 };
 
-type AgentRole = "Orchestrator" | "Curator" | "Developer" | "Polisher" | "Gatekeeper" | "Reviewer";
+type AgentRole =
+  | "Orchestrator"
+  | "Curator"
+  | "FrontendDeveloper"
+  | "Developer"
+  | "Polisher"
+  | "Gatekeeper"
+  | "Reviewer";
 type JsonLogValue = string | number | boolean | null | JsonLogValue[] | { [key: string]: JsonLogValue };
 type BacklogChangeTargetType = "epic" | "item" | "question";
 
@@ -229,7 +236,23 @@ export class BacklogService {
     return { ...epic };
   }
 
+  async peekNextReadyEpic(status?: BacklogEpicStatus): Promise<BacklogEpic | null> {
+    const items = await this.getOrInitializeItems();
+    const epicsById = new Map(items.epics.map((epic) => [epic.id, epic]));
+    const targetStatuses = status ? [status] : READY_EPIC_STATUSES;
+    const candidate = items.epics.find((epic) => targetStatuses.includes(epic.status) && isVisible(epic, epicsById));
+    return candidate ? { ...candidate, developmentScopes: [...candidate.developmentScopes] } : null;
+  }
+
   async claimReadyEpicForImplementation(actorId?: string): Promise<BacklogEpic | null> {
+    const candidate = await this.peekNextReadyEpic();
+    if (!candidate) {
+      return null;
+    }
+    return this.claimEpicForImplementation(candidate.id, actorId);
+  }
+
+  async claimEpicForImplementation(epicId: string, actorId?: string): Promise<BacklogEpic | null> {
     const items = await this.getOrInitializeItems();
     const epicsById = new Map(items.epics.map((epic) => [epic.id, epic]));
 
@@ -242,8 +265,11 @@ export class BacklogService {
       return null;
     }
 
-    const candidate = items.epics.find((epic) => READY_EPIC_STATUSES.includes(epic.status) && isVisible(epic, epicsById));
+    const candidate = items.epics.find((epic) => epic.id === epicId);
     if (!candidate) {
+      return null;
+    }
+    if (!READY_EPIC_STATUSES.includes(candidate.status) || !isVisible(candidate, epicsById)) {
       return null;
     }
 

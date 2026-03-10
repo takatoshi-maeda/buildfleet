@@ -5,6 +5,25 @@ import { describe, expect, it } from "vitest";
 import { AgentEventQueueService } from "../src/domain/events/agent-event-queue-service.js";
 import type { AgentRuntimeCollection } from "../src/domain/agent-runtime-model.js";
 
+class StubBacklogService {
+  constructor(
+    private readonly epic:
+      | {
+          id: string;
+          developmentScopes: string[];
+        }
+      | null = null,
+  ) {}
+
+  async peekNextReadyEpic() {
+    return this.epic;
+  }
+
+  async readEpic() {
+    return this.epic;
+  }
+}
+
 describe("AgentEventQueueService", () => {
   it("enqueues docs.update messages only for running subscribed roles", async () => {
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codefleet-event-queue-"));
@@ -47,7 +66,7 @@ describe("AgentEventQueueService", () => {
 
     await fs.writeFile(path.join(runtimeDir, "agents.json"), `${JSON.stringify(runtimes, null, 2)}\n`, "utf8");
 
-    const service = new AgentEventQueueService(runtimeDir);
+    const service = new AgentEventQueueService(runtimeDir, new StubBacklogService());
     const result = await service.enqueueToRunningAgents({ type: "docs.update", paths: ["docs/spec.md"] });
 
     expect(result.enqueuedAgentIds).toEqual(["curator-1"]);
@@ -106,7 +125,7 @@ describe("AgentEventQueueService", () => {
 
     await fs.writeFile(path.join(runtimeDir, "agents.json"), `${JSON.stringify(runtimes, null, 2)}\n`, "utf8");
 
-    const service = new AgentEventQueueService(runtimeDir);
+    const service = new AgentEventQueueService(runtimeDir, new StubBacklogService());
     const result = await service.enqueueToRunningAgents({
       type: "source-brief.update",
       briefPath: ".codefleet/data/source-brief/latest.md",
@@ -149,7 +168,7 @@ describe("AgentEventQueueService", () => {
 
     await fs.writeFile(path.join(runtimeDir, "agents.json"), `${JSON.stringify(runtimes, null, 2)}\n`, "utf8");
 
-    const service = new AgentEventQueueService(runtimeDir);
+    const service = new AgentEventQueueService(runtimeDir, new StubBacklogService());
     const result = await service.enqueueToRunningAgents({ type: "acceptance-test.update" });
 
     expect(result.enqueuedAgentIds).toEqual(["orchestrator-1"]);
@@ -188,7 +207,7 @@ describe("AgentEventQueueService", () => {
 
     await fs.writeFile(path.join(runtimeDir, "agents.json"), `${JSON.stringify(runtimes, null, 2)}\n`, "utf8");
 
-    const service = new AgentEventQueueService(runtimeDir);
+    const service = new AgentEventQueueService(runtimeDir, new StubBacklogService());
     const result = await service.enqueueToRunningAgents({ type: "backlog.epic.review.ready", epicId: "E-123" });
 
     expect(result.enqueuedAgentIds).toEqual(["reviewer-1"]);
@@ -227,7 +246,7 @@ describe("AgentEventQueueService", () => {
 
     await fs.writeFile(path.join(runtimeDir, "agents.json"), `${JSON.stringify(runtimes, null, 2)}\n`, "utf8");
 
-    const service = new AgentEventQueueService(runtimeDir);
+    const service = new AgentEventQueueService(runtimeDir, new StubBacklogService());
     const result = await service.enqueueToRunningAgents({ type: "backlog.epic.polish.ready", epicId: "E-999" });
 
     expect(result.enqueuedAgentIds).toEqual(["polisher-1"]);
@@ -266,11 +285,60 @@ describe("AgentEventQueueService", () => {
 
     await fs.writeFile(path.join(runtimeDir, "agents.json"), `${JSON.stringify(runtimes, null, 2)}\n`, "utf8");
 
-    const service = new AgentEventQueueService(runtimeDir);
+    const service = new AgentEventQueueService(runtimeDir, new StubBacklogService());
     const result = await service.enqueueToRunningAgents({ type: "backlog.epic.ready" });
 
     expect(result.enqueuedAgentIds).toEqual(["developer-1"]);
     expect(result.files).toHaveLength(1);
+  });
+
+  it("routes frontend-scoped backlog.epic.ready to FrontendDeveloper", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codefleet-event-queue-"));
+    const runtimeDir = path.join(tempDir, ".codefleet", "runtime");
+    await fs.mkdir(runtimeDir, { recursive: true });
+
+    const runtimes: AgentRuntimeCollection = {
+      version: 1,
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      agents: [
+        {
+          id: "frontend-developer-1",
+          role: "FrontendDeveloper",
+          status: "running",
+          pid: 111,
+          cwd: tempDir,
+          startedAt: "2026-01-01T00:00:00.000Z",
+          lastHeartbeatAt: "2026-01-01T00:00:00.000Z",
+        },
+        {
+          id: "developer-1",
+          role: "Developer",
+          status: "running",
+          pid: 222,
+          cwd: tempDir,
+          startedAt: "2026-01-01T00:00:00.000Z",
+          lastHeartbeatAt: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+    };
+
+    await fs.writeFile(path.join(runtimeDir, "agents.json"), `${JSON.stringify(runtimes, null, 2)}\n`, "utf8");
+
+    const service = new AgentEventQueueService(
+      runtimeDir,
+      new StubBacklogService({ id: "E-101", developmentScopes: ["frontend", "backend"] }),
+    );
+    const result = await service.enqueueToRunningAgents({ type: "backlog.epic.ready" });
+
+    expect(result.enqueuedAgentIds).toEqual(["frontend-developer-1"]);
+    expect(result.files).toHaveLength(1);
+
+    const message = JSON.parse(await fs.readFile(result.files[0]!, "utf8")) as {
+      event: { type: string; epicId: string };
+      agentRole: string;
+    };
+    expect(message.agentRole).toBe("FrontendDeveloper");
+    expect(message.event).toEqual({ type: "backlog.epic.frontend.ready", epicId: "E-101" });
   });
 
   it("enqueues debug.playwright-test for all running reviewers", async () => {
@@ -314,7 +382,7 @@ describe("AgentEventQueueService", () => {
 
     await fs.writeFile(path.join(runtimeDir, "agents.json"), `${JSON.stringify(runtimes, null, 2)}\n`, "utf8");
 
-    const service = new AgentEventQueueService(runtimeDir);
+    const service = new AgentEventQueueService(runtimeDir, new StubBacklogService());
     const result = await service.enqueueToRunningAgents({ type: "debug.playwright-test" });
 
     expect(result.enqueuedAgentIds).toEqual(["reviewer-1", "reviewer-2"]);
@@ -353,7 +421,7 @@ describe("AgentEventQueueService", () => {
 
     await fs.writeFile(path.join(runtimeDir, "agents.json"), `${JSON.stringify(runtimes, null, 2)}\n`, "utf8");
 
-    const service = new AgentEventQueueService(runtimeDir);
+    const service = new AgentEventQueueService(runtimeDir, new StubBacklogService());
     const result = await service.enqueueToRunningAgents({ type: "acceptance-test.required" });
 
     expect(result.enqueuedAgentIds).toEqual(["gatekeeper-1"]);
@@ -392,7 +460,7 @@ describe("AgentEventQueueService", () => {
 
     await fs.writeFile(path.join(runtimeDir, "agents.json"), `${JSON.stringify(runtimes, null, 2)}\n`, "utf8");
 
-    const service = new AgentEventQueueService(runtimeDir);
+    const service = new AgentEventQueueService(runtimeDir, new StubBacklogService());
     const result = await service.enqueueToRunningAgents({
       type: "feedback-note.create",
       path: ".codefleet/data/feedback-notes/01HXTEST0000000000000000.md",
@@ -444,7 +512,7 @@ describe("AgentEventQueueService", () => {
       "utf8",
     );
 
-    const service = new AgentEventQueueService(runtimeDir);
+    const service = new AgentEventQueueService(runtimeDir, new StubBacklogService());
     const result = await service.enqueueToRunningAgents({ type: "backlog.epic.ready" });
 
     expect(result.enqueuedAgentIds).toEqual([]);
@@ -488,7 +556,7 @@ describe("AgentEventQueueService", () => {
       "utf8",
     );
 
-    const service = new AgentEventQueueService(runtimeDir);
+    const service = new AgentEventQueueService(runtimeDir, new StubBacklogService());
     const result = await service.enqueueToRunningAgents({ type: "acceptance-test.required" });
 
     expect(result.enqueuedAgentIds).toEqual([]);

@@ -122,6 +122,7 @@ async function validateQueueMessage(filePath: string): Promise<AgentEventQueueMe
   if (
     message.agentRole !== "Orchestrator" &&
     message.agentRole !== "Curator" &&
+    message.agentRole !== "FrontendDeveloper" &&
     message.agentRole !== "Developer" &&
     message.agentRole !== "Polisher" &&
     message.agentRole !== "Gatekeeper" &&
@@ -164,6 +165,8 @@ async function validateQueueMessage(filePath: string): Promise<AgentEventQueueMe
     message.event.type !== "acceptance-test.required" &&
     message.event.type !== "backlog.update" &&
     message.event.type !== "backlog.epic.ready" &&
+    message.event.type !== "backlog.epic.frontend.ready" &&
+    message.event.type !== "backlog.epic.frontend.completed" &&
     message.event.type !== "backlog.epic.polish.ready" &&
     message.event.type !== "backlog.epic.review.ready" &&
     message.event.type !== "debug.playwright-test"
@@ -172,6 +175,8 @@ async function validateQueueMessage(filePath: string): Promise<AgentEventQueueMe
   }
   if (
     (message.event.type === "backlog.epic.ready" ||
+      message.event.type === "backlog.epic.frontend.ready" ||
+      message.event.type === "backlog.epic.frontend.completed" ||
       message.event.type === "backlog.epic.polish.ready" ||
       message.event.type === "backlog.epic.review.ready") &&
     message.event.epicId !== undefined &&
@@ -181,6 +186,18 @@ async function validateQueueMessage(filePath: string): Promise<AgentEventQueueMe
   }
   if (message.event.type === "backlog.epic.polish.ready" && (!message.event.epicId || message.event.epicId.length === 0)) {
     throw new Error("queue message.event.epicId is required for backlog.epic.polish.ready");
+  }
+  if (
+    message.event.type === "backlog.epic.frontend.ready" &&
+    (!message.event.epicId || message.event.epicId.length === 0)
+  ) {
+    throw new Error("queue message.event.epicId is required for backlog.epic.frontend.ready");
+  }
+  if (
+    message.event.type === "backlog.epic.frontend.completed" &&
+    (!message.event.epicId || message.event.epicId.length === 0)
+  ) {
+    throw new Error("queue message.event.epicId is required for backlog.epic.frontend.completed");
   }
   if (message.event.type === "backlog.epic.review.ready" && (!message.event.epicId || message.event.epicId.length === 0)) {
     throw new Error("queue message.event.epicId is required for backlog.epic.review.ready");

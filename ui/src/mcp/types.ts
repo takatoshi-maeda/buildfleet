@@ -64,6 +64,8 @@ export type CodefleetItemGetResult = {
 
 export type CodefleetAgentRole =
   | 'Orchestrator'
+  | 'Curator'
+  | 'FrontendDeveloper'
   | 'Developer'
   | 'Polisher'
   | 'Gatekeeper'

@@ -9,6 +9,7 @@ describe("agent-role-definitions", () => {
   it("keeps event subscriptions by role", () => {
     expect(getAgentRoleDefinition("Orchestrator").role).toBe("Orchestrator");
     expect(getAgentRoleDefinition("Curator").role).toBe("Curator");
+    expect(getAgentRoleDefinition("FrontendDeveloper").role).toBe("FrontendDeveloper");
     expect(getAgentRoleDefinition("Developer").role).toBe("Developer");
     expect(getAgentRoleDefinition("Polisher").role).toBe("Polisher");
     expect(getAgentRoleDefinition("Gatekeeper").role).toBe("Gatekeeper");
@@ -18,6 +19,12 @@ describe("agent-role-definitions", () => {
     expect(isRoleSubscribedToEvent("Developer", { type: "docs.update", paths: ["docs/a.md"] })).toBe(false);
     expect(isRoleSubscribedToEvent("Developer", { type: "acceptance-test.update" })).toBe(false);
     expect(isRoleSubscribedToEvent("Developer", { type: "backlog.epic.ready" })).toBe(true);
+    expect(isRoleSubscribedToEvent("FrontendDeveloper", { type: "backlog.epic.frontend.ready", epicId: "E-001" })).toBe(
+      true,
+    );
+    expect(isRoleSubscribedToEvent("Developer", { type: "backlog.epic.frontend.completed", epicId: "E-001" })).toBe(
+      true,
+    );
     expect(isRoleSubscribedToEvent("Polisher", { type: "backlog.epic.polish.ready", epicId: "E-001" })).toBe(true);
     expect(isRoleSubscribedToEvent("Reviewer", { type: "backlog.epic.review.ready", epicId: "E-001" })).toBe(true);
     expect(isRoleSubscribedToEvent("Reviewer", { type: "debug.playwright-test" })).toBe(true);
@@ -68,9 +75,17 @@ describe("agent-role-definitions", () => {
     expect(defaultPrompt.promptEventType).toBe("docs.update");
     expect(defaultPrompt.emitEventType).toBeNull();
 
+    const frontendPrompt = getRoleEventPromptDefinition("FrontendDeveloper", "backlog.epic.frontend.ready");
+    expect(frontendPrompt.promptEventType).toBe("implementation-frontend");
+    expect(frontendPrompt.emitEventType).toBe("backlog.epic.frontend.completed");
+
     const developerPrompt = getRoleEventPromptDefinition("Developer", "backlog.epic.ready");
     expect(developerPrompt.promptEventType).toBe("implementation");
     expect(developerPrompt.emitEventType).toBe("backlog.epic.polish.ready");
+
+    const developerHandoffPrompt = getRoleEventPromptDefinition("Developer", "backlog.epic.frontend.completed");
+    expect(developerHandoffPrompt.promptEventType).toBe("implementation-after-frontend");
+    expect(developerHandoffPrompt.emitEventType).toBe("backlog.epic.polish.ready");
 
     const polisherPrompt = getRoleEventPromptDefinition("Polisher", "backlog.epic.polish.ready");
     expect(polisherPrompt.promptEventType).toBe("polishing");

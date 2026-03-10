@@ -30,6 +30,7 @@ const DEFAULT_RUNTIME_DIR = ".codefleet/runtime";
 const DEFAULT_LOG_DIR = ".codefleet/logs/agents";
 const CONFIG_FILE_NAME = "config.json";
 const DEFAULT_GATEKEEPER_COUNT = 1;
+const DEFAULT_FRONTEND_DEVELOPER_COUNT = 1;
 const DEFAULT_DEVELOPER_COUNT = 1;
 const DEFAULT_DESIGNER_COUNT = 1;
 const DEFAULT_REVIEWER_COUNT = 1;
@@ -119,6 +120,7 @@ export class FleetService {
   async up(input: {
     detached?: boolean;
     gatekeepers?: number;
+    frontendDevelopers?: number;
     developers?: number;
     polishers?: number;
     reviewers?: number;
@@ -140,6 +142,7 @@ export class FleetService {
 
     const targets = buildTargetAgents({
       gatekeepers: input.gatekeepers ?? DEFAULT_GATEKEEPER_COUNT,
+      frontendDevelopers: input.frontendDevelopers ?? DEFAULT_FRONTEND_DEVELOPER_COUNT,
       developers: input.developers ?? DEFAULT_DEVELOPER_COUNT,
       polishers: input.polishers ?? DEFAULT_DESIGNER_COUNT,
       reviewers: input.reviewers ?? DEFAULT_REVIEWER_COUNT,
@@ -283,6 +286,7 @@ export class FleetService {
   async restart(input: {
     detached?: boolean;
     gatekeepers?: number;
+    frontendDevelopers?: number;
     developers?: number;
     polishers?: number;
     reviewers?: number;
@@ -609,7 +613,7 @@ function parseRoleHooksByAgentRole(value: unknown): RoleHooksByAgentRole {
   const candidate = isRecord(value.roles) ? value.roles : value;
   const parsed: RoleHooksByAgentRole = {};
 
-  for (const role of ["Orchestrator", "Curator", "Developer", "Polisher", "Gatekeeper", "Reviewer"] as const) {
+  for (const role of ["Orchestrator", "Curator", "FrontendDeveloper", "Developer", "Polisher", "Gatekeeper", "Reviewer"] as const) {
     const roleValue = candidate[role];
     if (roleValue === undefined) {
       continue;
@@ -709,7 +713,10 @@ function buildFollowUpEvent(nextEventType: SystemEvent["type"], sourceEvent: Sys
   }
   if (nextEventType === "backlog.epic.review.ready") {
     const epicId =
-      sourceEvent.type === "backlog.epic.ready" || sourceEvent.type === "backlog.epic.polish.ready"
+      sourceEvent.type === "backlog.epic.ready" ||
+      sourceEvent.type === "backlog.epic.frontend.ready" ||
+      sourceEvent.type === "backlog.epic.frontend.completed" ||
+      sourceEvent.type === "backlog.epic.polish.ready"
         ? sourceEvent.epicId
         : undefined;
     if (!epicId) {
@@ -720,12 +727,25 @@ function buildFollowUpEvent(nextEventType: SystemEvent["type"], sourceEvent: Sys
     }
     return { type: "backlog.epic.review.ready", epicId };
   }
-  if (nextEventType === "backlog.epic.polish.ready") {
-    const epicId = sourceEvent.type === "backlog.epic.ready" ? sourceEvent.epicId : undefined;
+  if (nextEventType === "backlog.epic.frontend.completed") {
+    const epicId = sourceEvent.type === "backlog.epic.frontend.ready" ? sourceEvent.epicId : undefined;
     if (!epicId) {
       throw new CodefleetError(
         "ERR_VALIDATION",
-        "cannot emit backlog.epic.polish.ready without epicId from source backlog.epic.ready event",
+        "cannot emit backlog.epic.frontend.completed without epicId from source backlog.epic.frontend.ready event",
+      );
+    }
+    return { type: "backlog.epic.frontend.completed", epicId };
+  }
+  if (nextEventType === "backlog.epic.polish.ready") {
+    const epicId =
+      sourceEvent.type === "backlog.epic.ready" || sourceEvent.type === "backlog.epic.frontend.completed"
+        ? sourceEvent.epicId
+        : undefined;
+    if (!epicId) {
+      throw new CodefleetError(
+        "ERR_VALIDATION",
+        "cannot emit backlog.epic.polish.ready without epicId from source backlog.epic.ready/backlog.epic.frontend.completed event",
       );
     }
     return { type: "backlog.epic.polish.ready", epicId };
@@ -747,6 +767,7 @@ interface TargetAgent {
 
 interface RoleCountInput {
   gatekeepers: number;
+  frontendDevelopers: number;
   developers: number;
   polishers: number;
   reviewers: number;
@@ -754,6 +775,7 @@ interface RoleCountInput {
 
 function buildTargetAgents(counts: RoleCountInput): TargetAgent[] {
   validateRoleCount("gatekeepers", counts.gatekeepers);
+  validateRoleCount("frontendDevelopers", counts.frontendDevelopers);
   validateRoleCount("developers", counts.developers);
   validateRoleCount("polishers", counts.polishers);
   validateRoleCount("reviewers", counts.reviewers);
@@ -762,6 +784,7 @@ function buildTargetAgents(counts: RoleCountInput): TargetAgent[] {
     ...buildAgentsByRole("Orchestrator", "orchestrator", FIXED_ORCHESTRATOR_COUNT),
     ...buildAgentsByRole("Curator", "curator", FIXED_CURATOR_COUNT),
     ...buildAgentsByRole("Gatekeeper", "gatekeeper", counts.gatekeepers),
+    ...buildAgentsByRole("FrontendDeveloper", "frontend-developer", counts.frontendDevelopers),
     ...buildAgentsByRole("Developer", "developer", counts.developers),
     ...buildAgentsByRole("Polisher", "polisher", counts.polishers),
     ...buildAgentsByRole("Reviewer", "reviewer", counts.reviewers),
@@ -880,7 +903,7 @@ async function safeRead(filePath: string): Promise<string> {
 
 function buildResolvedRuntimeConfigByRole(config: Record<string, unknown> | null): Map<AgentRole, ResolvedRoleRuntimeConfig> {
   return new Map(
-    (["Orchestrator", "Curator", "Developer", "Polisher", "Gatekeeper", "Reviewer"] as const).map((role) => [
+    (["Orchestrator", "Curator", "FrontendDeveloper", "Developer", "Polisher", "Gatekeeper", "Reviewer"] as const).map((role) => [
       role,
       resolveRoleRuntimeConfig(config, role),
     ]),

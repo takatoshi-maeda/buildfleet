@@ -332,7 +332,7 @@ describe("FleetService", () => {
 
     const upStatus = await service.up();
     expect(upStatus.summary).toBe("running");
-    expect(upStatus.agents).toHaveLength(6);
+    expect(upStatus.agents).toHaveLength(7);
     expect(upStatus.agents.every((agent) => agent.status === "running")).toBe(true);
     expect(upStatus.agents.every((agent) => agent.provider === "codex-app-server")).toBe(true);
     expect(upStatus.sessions.every((session) => session.status === "ready")).toBe(true);
@@ -340,6 +340,7 @@ describe("FleetService", () => {
       expect.objectContaining({ agentId: "orchestrator-1", role: "Orchestrator", detached: false }),
       expect.objectContaining({ agentId: "curator-1", role: "Curator", detached: false }),
       expect.objectContaining({ agentId: "gatekeeper-1", role: "Gatekeeper", detached: false }),
+      expect.objectContaining({ agentId: "frontend-developer-1", role: "FrontendDeveloper", detached: false }),
       expect.objectContaining({ agentId: "developer-1", role: "Developer", detached: false }),
       expect.objectContaining({ agentId: "polisher-1", role: "Polisher", detached: false }),
       expect.objectContaining({ agentId: "reviewer-1", role: "Reviewer", detached: false }),
@@ -348,15 +349,16 @@ describe("FleetService", () => {
 
     const downStatus = await service.down({ all: true });
     expect(downStatus.summary).toBe("stopped");
-    expect(downStatus.agents).toHaveLength(6);
+    expect(downStatus.agents).toHaveLength(7);
     expect(downStatus.agents.every((agent) => agent.status === "stopped")).toBe(true);
-    expect(downStatus.sessions).toHaveLength(6);
+    expect(downStatus.sessions).toHaveLength(7);
     expect(downStatus.sessions.every((session) => session.status === "disconnected")).toBe(true);
-    expect(processManager.stopped.length).toBe(6);
-    expect(processManager.stopped).toEqual([12345, 12345, 12345, 12345, 12345, 12345]);
+    expect(processManager.stopped.length).toBe(7);
+    expect(processManager.stopped).toEqual([12345, 12345, 12345, 12345, 12345, 12345, 12345]);
     expect(appServer.shutdowns.sort()).toEqual([
       "curator-1",
       "developer-1",
+      "frontend-developer-1",
       "gatekeeper-1",
       "orchestrator-1",
       "polisher-1",
@@ -385,7 +387,7 @@ describe("FleetService", () => {
       runtime,
     );
 
-    await service.up({ reviewers: 0, polishers: 0, developers: 0, gatekeepers: 0 });
+    await service.up({ reviewers: 0, polishers: 0, developers: 0, frontendDevelopers: 0, gatekeepers: 0 });
     expect(runtime.prepared.map((entry) => entry.agentId)).toEqual(["orchestrator-1", "curator-1"]);
     expect(appServer.started).toEqual([]);
 
@@ -796,7 +798,7 @@ describe("FleetService", () => {
       resolver,
     );
 
-    await service.up({ gatekeepers: 0, developers: 0, polishers: 0, reviewers: 0 });
+    await service.up({ gatekeepers: 0, developers: 0, frontendDevelopers: 0, polishers: 0, reviewers: 0 });
     expect(claudeRuntime.prepared.map((entry) => entry.agentId)).toEqual(["orchestrator-1"]);
     expect(codexRuntime.prepared.map((entry) => entry.agentId)).toEqual(["curator-1"]);
 
@@ -870,6 +872,56 @@ describe("FleetService", () => {
     });
     expect(emittedEvent).toEqual({ type: "backlog.epic.polish.ready", epicId: "E-123" });
     expect(appServer.startedTurns[0]?.input[0]?.text).toContain("Epic ID to implement now: E-123");
+  });
+
+  it("emits developer handoff event after frontend developer prompt", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codefleet-fleet-"));
+    const rolesPath = path.join(tempDir, ".codefleet/roles.json");
+    const runtimeDir = path.join(tempDir, ".codefleet/runtime");
+    const logDir = path.join(tempDir, ".codefleet/logs/agents");
+    const appServer = new FakeAppServerClient();
+    const service = new FleetService(
+      rolesPath,
+      runtimeDir,
+      logDir,
+      new FakeProcessManager() as never,
+      appServer as never,
+    );
+
+    await service.up();
+    const emittedEvent = await service.dispatchAgentEvent({
+      agentId: "frontend-developer-1",
+      agentRole: "FrontendDeveloper",
+      event: { type: "backlog.epic.frontend.ready", epicId: "E-222" },
+    });
+
+    expect(emittedEvent).toEqual({ type: "backlog.epic.frontend.completed", epicId: "E-222" });
+    expect(appServer.startedTurns[0]?.input[0]?.text).toContain("Epic ID to implement frontend scope for now: E-222");
+  });
+
+  it("emits backlog.epic.polish.ready after developer receives frontend handoff", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codefleet-fleet-"));
+    const rolesPath = path.join(tempDir, ".codefleet/roles.json");
+    const runtimeDir = path.join(tempDir, ".codefleet/runtime");
+    const logDir = path.join(tempDir, ".codefleet/logs/agents");
+    const appServer = new FakeAppServerClient();
+    const service = new FleetService(
+      rolesPath,
+      runtimeDir,
+      logDir,
+      new FakeProcessManager() as never,
+      appServer as never,
+    );
+
+    await service.up();
+    const emittedEvent = await service.dispatchAgentEvent({
+      agentId: "developer-1",
+      agentRole: "Developer",
+      event: { type: "backlog.epic.frontend.completed", epicId: "E-223" },
+    });
+
+    expect(emittedEvent).toEqual({ type: "backlog.epic.polish.ready", epicId: "E-223" });
+    expect(appServer.startedTurns[0]?.input[0]?.text).toContain("Epic ID to continue after FrontendDeveloper handoff: E-223");
   });
 
   it("emits backlog.epic.review.ready after polisher polishing prompt", async () => {

@@ -44,11 +44,24 @@ const AGENT_ROLE_DEFINITIONS: Record<AgentRole, AgentRoleDefinition> = {
       },
     },
   },
+  FrontendDeveloper: {
+    role: "FrontendDeveloper",
+    subscribedEvents: {
+      "backlog.epic.frontend.ready": {
+        triggerEvent: "implementation-frontend",
+        emitEvent: "backlog.epic.frontend.completed",
+      },
+    },
+  },
   Developer: {
     role: "Developer",
     subscribedEvents: {
       "backlog.epic.ready": {
         triggerEvent: "implementation",
+        emitEvent: "backlog.epic.polish.ready",
+      },
+      "backlog.epic.frontend.completed": {
+        triggerEvent: "implementation-after-frontend",
         emitEvent: "backlog.epic.polish.ready",
       },
     },

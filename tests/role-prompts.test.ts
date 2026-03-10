@@ -42,11 +42,15 @@ describe("role prompts", () => {
   });
 
   it("requires downstream roles to read the Source Brief before acting", async () => {
-    const [developerPrompt, reviewerPrompt, polisherPrompt] = await Promise.all([
+    const [frontendDeveloperPrompt, developerPrompt, reviewerPrompt, polisherPrompt] = await Promise.all([
+      getRoleStartupPrompt("FrontendDeveloper"),
       getRoleStartupPrompt("Developer"),
       getRoleStartupPrompt("Reviewer"),
       getRoleStartupPrompt("Polisher"),
     ]);
+
+    expect(frontendDeveloperPrompt).toContain("Read `.codefleet/data/source-brief/latest.md` before implementation work");
+    expect(frontendDeveloperPrompt).toContain("Developer can continue without rediscovering frontend decisions");
 
     expect(developerPrompt).toContain("Read `.codefleet/data/source-brief/latest.md` before implementation work");
     expect(developerPrompt).toContain("`Overview`, `Implementation Constraints`, and `Definition of Done`");
@@ -56,5 +60,17 @@ describe("role prompts", () => {
 
     expect(polisherPrompt).toContain("Read `.codefleet/data/source-brief/latest.md` before polishing");
     expect(polisherPrompt).toContain("`Overview`, `Implementation Constraints`, and `Definition of Done`");
+  });
+
+  it("provides a dedicated developer handoff prompt for frontend-completed events", async () => {
+    const [frontendEventPrompt, developerHandoffPrompt] = await Promise.all([
+      getRoleEventPromptTemplate("FrontendDeveloper", "implementation-frontend"),
+      getRoleEventPromptTemplate("Developer", "implementation-after-frontend"),
+    ]);
+
+    expect(frontendEventPrompt).toContain("Implement only the frontend-related portion");
+    expect(frontendEventPrompt).toContain("handoff notes");
+    expect(developerHandoffPrompt).toContain("starting point");
+    expect(developerHandoffPrompt).toContain("Do not re-implement frontend work");
   });
 });

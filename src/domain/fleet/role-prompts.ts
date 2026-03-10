@@ -49,6 +49,9 @@ export async function getRoleEventPromptTemplate(role: AgentRole, eventType: str
 }
 
 function roleToPromptDir(role: AgentRole): string {
+  if (role === "FrontendDeveloper") {
+    return "frontend-developer";
+  }
   return role.toLowerCase();
 }
 

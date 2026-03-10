@@ -4,6 +4,7 @@ import { atomicWriteJson } from "../../infra/fs/atomic-write.js";
 import type { SystemEvent } from "../../events/router.js";
 import { createUlid } from "../../shared/ulid.js";
 import type { AgentRuntimeCollection } from "../agent-runtime-model.js";
+import { BacklogService } from "../backlog/backlog-service.js";
 import { isRoleSubscribedToEvent } from "../fleet/agent-role-definitions.js";
 import type { AgentEventQueueMessage } from "./agent-event-queue-message-model.js";
 
@@ -11,20 +12,34 @@ const DEFAULT_RUNTIME_DIR = ".codefleet/runtime";
 const AGENTS_FILE = "agents.json";
 const EVENT_QUEUE_ROOT = "events/agents";
 
+interface QueueRoutingEpic {
+  id: string;
+  developmentScopes: string[];
+}
+
+interface QueueRoutingBacklogService {
+  peekNextReadyEpic(): Promise<QueueRoutingEpic | null>;
+  readEpic(input: { id: string }): Promise<QueueRoutingEpic | null>;
+}
+
 export interface AgentEventQueueEnqueueResult {
   enqueuedAgentIds: string[];
   files: string[];
 }
 
 export class AgentEventQueueService {
-  constructor(private readonly runtimeDir: string = DEFAULT_RUNTIME_DIR) {}
+  constructor(
+    private readonly runtimeDir: string = DEFAULT_RUNTIME_DIR,
+    private readonly backlogService: QueueRoutingBacklogService = new BacklogService(),
+  ) {}
 
   async enqueueToRunningAgents(event: SystemEvent): Promise<AgentEventQueueEnqueueResult> {
     const runtimes = await this.readRuntime();
+    const routedEvent = await this.resolveQueueEvent(event);
     const runningAgents = runtimes.agents
-      .filter((agent) => agent.status === "running" && isRoleSubscribedToEvent(agent.role, event))
+      .filter((agent) => agent.status === "running" && isRoleSubscribedToEvent(agent.role, routedEvent))
       .sort((left, right) => left.id.localeCompare(right.id));
-    const targetAgents = await this.resolveTargetAgents(event, runningAgents);
+    const targetAgents = await this.resolveTargetAgents(routedEvent, runningAgents);
 
     const createdAt = new Date().toISOString();
     const files: string[] = [];
@@ -44,9 +59,9 @@ export class AgentEventQueueService {
         createdAt,
         agentId: agent.id,
         agentRole: agent.role,
-        event,
+        event: routedEvent,
         source: {
-          command: `codefleet trigger ${event.type}`,
+          command: `codefleet trigger ${routedEvent.type}`,
         },
       };
       await atomicWriteJson(queueFilePath, message);
@@ -64,10 +79,12 @@ export class AgentEventQueueService {
     runningAgents: AgentRuntimeCollection["agents"],
   ): Promise<AgentRuntimeCollection["agents"]> {
     const serializedRoleByEventType: Partial<
-      Record<SystemEvent["type"], "Developer" | "Polisher" | "Reviewer" | "Gatekeeper">
+      Record<SystemEvent["type"], "FrontendDeveloper" | "Developer" | "Polisher" | "Reviewer" | "Gatekeeper">
     > = {
       "source-brief.update": "Gatekeeper",
       "backlog.epic.ready": "Developer",
+      "backlog.epic.frontend.ready": "FrontendDeveloper",
+      "backlog.epic.frontend.completed": "Developer",
       "backlog.epic.polish.ready": "Polisher",
       "backlog.epic.review.ready": "Reviewer",
       "acceptance-test.required": "Gatekeeper",
@@ -87,6 +104,30 @@ export class AgentEventQueueService {
       return [];
     }
     return [target];
+  }
+
+  private async resolveQueueEvent(event: SystemEvent): Promise<SystemEvent> {
+    if (event.type !== "backlog.epic.ready") {
+      return event;
+    }
+
+    const epic =
+      event.epicId !== undefined
+        ? await this.backlogService.readEpic({ id: event.epicId })
+        : await this.backlogService.peekNextReadyEpic();
+    if (!epic) {
+      return event;
+    }
+    if (!epic.developmentScopes.includes("frontend")) {
+      return {
+        type: "backlog.epic.ready",
+        epicId: event.epicId ?? epic.id,
+      };
+    }
+    return {
+      type: "backlog.epic.frontend.ready",
+      epicId: epic.id,
+    };
   }
 
   private async hasInFlightEvent(agentId: string, eventType: SystemEvent["type"]): Promise<boolean> {

@@ -162,6 +162,33 @@ describe("AgentEventQueueWorkerService", () => {
     expect(result.failedFiles).toHaveLength(0);
   });
 
+  it("accepts backlog.epic.frontend.ready with FrontendDeveloper role", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codefleet-event-worker-"));
+    const runtimeDir = path.join(tempDir, ".codefleet", "runtime");
+    const pendingDir = path.join(runtimeDir, "events", "agents", "frontend-developer-1", "pending");
+    await fs.mkdir(pendingDir, { recursive: true });
+
+    await fs.writeFile(
+      path.join(pendingDir, "001-valid.json"),
+      `${JSON.stringify({
+        id: "1",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        agentId: "frontend-developer-1",
+        agentRole: "FrontendDeveloper",
+        event: { type: "backlog.epic.frontend.ready", epicId: "E-101" },
+        source: { command: "codefleet trigger backlog.epic.frontend.ready --epic-id E-101" },
+      })}\n`,
+      "utf8",
+    );
+
+    const service = new AgentEventQueueWorkerService(runtimeDir);
+    const result = await service.consume({ agentId: "frontend-developer-1", maxMessages: 10 });
+
+    expect(result.consumed).toBe(1);
+    expect(result.doneFiles).toHaveLength(1);
+    expect(result.failedFiles).toHaveLength(0);
+  });
+
   it("accepts feedback-note.create with a valid markdown path", async () => {
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codefleet-event-worker-"));
     const runtimeDir = path.join(tempDir, ".codefleet", "runtime");
