@@ -4,6 +4,7 @@ import { Stack } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 
 import { Board } from './components/Board';
+import { DocumentWorkspace } from './components/document/DocumentWorkspace';
 import { ThreadPane } from './components/ThreadPane';
 import { useCodefleetBoard } from './hooks/useCodefleetBoard';
 import type { CodefleetClient } from './mcp/client';
@@ -11,7 +12,7 @@ import { useOptionalStandaloneThemePreference } from './theme/StandaloneThemePre
 import { useCodefleetColors } from './theme/useCodefleetColors';
 
 const WIDE_BREAKPOINT = 768;
-const SCREEN_TABS = ['home', 'board'] as const;
+const SCREEN_TABS = ['document', 'board'] as const;
 
 type ScreenTab = (typeof SCREEN_TABS)[number];
 
@@ -58,7 +59,7 @@ export default function CodefleetScreen({
   const [fleetPeers, setFleetPeers] = useState<FleetPeerNode[]>([]);
   const [isPeerMenuOpen, setIsPeerMenuOpen] = useState(false);
   const [fleetEndpoint, setFleetEndpoint] = useState(() => normalizeEndpoint(endpointStore.get()));
-  const [activeTab, setActiveTab] = useState<ScreenTab>('board');
+  const [activeTab, setActiveTab] = useState<ScreenTab>('document');
   const sessionSlide = useRef(new Animated.Value(isSessionOpen ? 0 : 1)).current;
   const previousSessionOpen = useRef(isSessionOpen);
 
@@ -239,7 +240,7 @@ export default function CodefleetScreen({
                   { color: isActive ? colors.tint : colors.mutedText },
                 ]}
               >
-                {tab === 'home' ? 'Home' : 'Board'}
+                {tab === 'document' ? 'Document' : 'Board'}
               </Text>
             </Pressable>
           );
@@ -339,7 +340,7 @@ export default function CodefleetScreen({
                     }}
                   />
                 ) : (
-                  <View style={[styles.homeContainer, { backgroundColor: colors.background }]} />
+                  <DocumentWorkspace client={client} />
                 )}
               </View>
               {isBoardTabActive && isSessionMounted ? (
@@ -420,7 +421,7 @@ export default function CodefleetScreen({
               }}
             />
           ) : (
-            <View style={[styles.homeContainer, { backgroundColor: colors.background }]} />
+            <DocumentWorkspace client={client} />
           )}
         </>
       )}
@@ -516,7 +517,7 @@ const styles = StyleSheet.create({
   boardContainer: {
     flex: 1,
   },
-  homeContainer: {
+  documentContainer: {
     flex: 1,
   },
   sessionContainer: {
