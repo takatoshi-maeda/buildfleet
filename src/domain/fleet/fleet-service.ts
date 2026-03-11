@@ -750,16 +750,6 @@ function buildFollowUpEvent(nextEventType: SystemEvent["type"], sourceEvent: Sys
   if (nextEventType === "acceptance-test.update") {
     return { type: "acceptance-test.update" };
   }
-  if (nextEventType === "feedback-note.create") {
-    const feedbackNotePath = sourceEvent.type === "feedback-note.create" ? sourceEvent.path : undefined;
-    if (!feedbackNotePath) {
-      throw new CodefleetError(
-        "ERR_VALIDATION",
-        "cannot emit feedback-note.create without path from source feedback-note.create event",
-      );
-    }
-    return { type: "feedback-note.create", path: feedbackNotePath };
-  }
   if (nextEventType === "acceptance-test.required") {
     return { type: "acceptance-test.required" };
   }

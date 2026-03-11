@@ -433,48 +433,6 @@ describe("AgentEventQueueService", () => {
     expect(result.files).toHaveLength(1);
   });
 
-  it("does not enqueue feedback-note.create because orchestrator no longer subscribes to it", async () => {
-    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codefleet-event-queue-"));
-    const runtimeDir = path.join(tempDir, ".codefleet", "runtime");
-    await fs.mkdir(runtimeDir, { recursive: true });
-
-    const runtimes: AgentRuntimeCollection = {
-      version: 1,
-      updatedAt: "2026-01-01T00:00:00.000Z",
-      agents: [
-        {
-          id: "orchestrator-1",
-          role: "Orchestrator",
-          status: "running",
-          pid: 111,
-          cwd: tempDir,
-          startedAt: "2026-01-01T00:00:00.000Z",
-          lastHeartbeatAt: "2026-01-01T00:00:00.000Z",
-        },
-        {
-          id: "developer-1",
-          role: "Developer",
-          status: "running",
-          pid: 222,
-          cwd: tempDir,
-          startedAt: "2026-01-01T00:00:00.000Z",
-          lastHeartbeatAt: "2026-01-01T00:00:00.000Z",
-        },
-      ],
-    };
-
-    await fs.writeFile(path.join(runtimeDir, "agents.json"), `${JSON.stringify(runtimes, null, 2)}\n`, "utf8");
-
-    const service = new AgentEventQueueService(runtimeDir, new StubBacklogService());
-    const result = await service.enqueueToRunningAgents({
-      type: "feedback-note.create",
-      path: ".codefleet/data/feedback-notes/01HXTEST0000000000000000.md",
-    });
-
-    expect(result.enqueuedAgentIds).toEqual([]);
-    expect(result.files).toHaveLength(0);
-  });
-
   it("drops backlog.epic.ready when same event is already pending/processing", async () => {
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codefleet-event-queue-"));
     const runtimeDir = path.join(tempDir, ".codefleet", "runtime");

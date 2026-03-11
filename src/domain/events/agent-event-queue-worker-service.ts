@@ -159,19 +159,6 @@ async function validateQueueMessage(filePath: string): Promise<AgentEventQueueMe
     ) {
       throw new Error("queue message.event.sourcePaths must be string[] for source-brief.update");
     }
-  } else if (message.event.type === "feedback-note.create") {
-    if (typeof message.event.path !== "string" || message.event.path.trim().length === 0) {
-      throw new Error("queue message.event.path must be non-empty string for feedback-note.create");
-    }
-    if (message.event.path.includes("..")) {
-      throw new Error("queue message.event.path must not contain '..' for feedback-note.create");
-    }
-    if (message.event.path.startsWith("/") || /^[a-zA-Z]:[\\/]/u.test(message.event.path)) {
-      throw new Error("queue message.event.path must be project-root relative for feedback-note.create");
-    }
-    if (!message.event.path.endsWith(".md")) {
-      throw new Error("queue message.event.path must end with .md for feedback-note.create");
-    }
   } else if (
     message.event.type !== "acceptance-test.update" &&
     message.event.type !== "acceptance-test.required" &&

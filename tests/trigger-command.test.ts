@@ -44,7 +44,6 @@ describe("trigger command", () => {
 
     expect(output).toContain("release-plan.create");
     expect(output).toContain("source-brief.update");
-    expect(output).toContain("feedback-note.create");
     expect(output).toContain("acceptance-test.update");
     expect(output).toContain("acceptance-test.required");
     expect(output).toContain("backlog.update");
@@ -140,33 +139,6 @@ describe("trigger command", () => {
     ]);
     expect(queue.events).toEqual(router.events);
     expect(logSpy).toHaveBeenCalled();
-  });
-
-  it("builds feedback-note.create event with --path", async () => {
-    const router = new RecordingRouter();
-    const queue = new RecordingQueue();
-    const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
-
-    await createTriggerCommand({ router, queue }).parseAsync(
-      ["feedback-note.create", "--path", ".codefleet/data/feedback-notes/01HXTEST0000000000000000.md"],
-      { from: "user" },
-    );
-
-    expect(router.events).toEqual([
-      { type: "feedback-note.create", path: ".codefleet/data/feedback-notes/01HXTEST0000000000000000.md" },
-    ]);
-    expect(queue.events).toEqual([
-      { type: "feedback-note.create", path: ".codefleet/data/feedback-notes/01HXTEST0000000000000000.md" },
-    ]);
-    expect(logSpy).toHaveBeenCalled();
-  });
-
-  it("rejects feedback-note.create when --path is invalid", async () => {
-    const command = createTriggerCommand({ router: new RecordingRouter(), queue: new RecordingQueue() }).exitOverride();
-
-    await expect(command.parseAsync(["feedback-note.create", "--path", "../secret.md"], { from: "user" })).rejects.toThrow(
-      /must not contain '\.\.'/u,
-    );
   });
 
   it("builds acceptance-test.required event with no options", async () => {
