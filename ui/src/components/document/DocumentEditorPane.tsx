@@ -1,8 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useState } from 'react';
-import { Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useTheme } from '@react-navigation/native';
 
 import { useCodefleetColors } from '../../theme/useCodefleetColors';
+import { DocumentCodeEditor } from './DocumentCodeEditor';
 import type { DocumentTreeNode } from './documentTypes';
 
 type Props = {
@@ -38,6 +40,7 @@ export function DocumentEditorPane({
   onChangeDraft,
 }: Props) {
   const colors = useCodefleetColors();
+  const { dark } = useTheme();
   const [hoveredTabId, setHoveredTabId] = useState<string | null>(null);
   const [hoveredCloseTabId, setHoveredCloseTabId] = useState<string | null>(null);
 
@@ -116,19 +119,15 @@ export function DocumentEditorPane({
       </ScrollView>
 
       <View style={styles.editorBody}>
-        <TextInput
-          multiline
+        <DocumentCodeEditor
           value={draft}
-          onChangeText={onChangeDraft}
-          style={[
-            styles.editorInput,
-            Platform.OS === 'web' ? styles.editorInputWeb : null,
-            { color: colors.text },
-          ]}
-          placeholder="Mock editor"
-          placeholderTextColor={colors.mutedText}
-          textAlignVertical="top"
-          scrollEnabled
+          onChange={onChangeDraft}
+          language={activeFile.language ?? 'text'}
+          textColor={colors.text}
+          mutedTextColor={colors.mutedText}
+          backgroundColor={colors.surface}
+          borderColor={colors.surfaceBorder}
+          isDark={dark}
         />
       </View>
     </View>
@@ -200,17 +199,5 @@ const styles = StyleSheet.create({
     flex: 1,
     minHeight: 0,
     overflow: 'hidden',
-  },
-  editorInput: {
-    height: '100%',
-    paddingHorizontal: 18,
-    paddingVertical: 16,
-    fontSize: 14,
-    lineHeight: 22,
-    fontFamily: 'monospace',
-  },
-  editorInputWeb: {
-    outlineWidth: 0,
-    outlineColor: 'transparent',
   },
 });
