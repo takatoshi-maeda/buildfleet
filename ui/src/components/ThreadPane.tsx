@@ -147,6 +147,65 @@ function getAgentMessageContent(entry: AgentEntry): string {
   return entry.errorMessage?.trim() || '';
 }
 
+function timelineItemKey(item: TimelineItem): string {
+  if (item.kind === 'reasoning') return `reasoning:${item.text}`;
+  if (item.kind === 'tool-call') {
+    return `tool:${item.summary}:${item.argumentLines?.join('\n') ?? ''}`;
+  }
+  return `text:${item.text}`;
+}
+
+function mergeTimeline(remote: TimelineItem[], local: TimelineItem[]): TimelineItem[] {
+  if (remote.length === 0) return [...local];
+  if (local.length === 0) return [...remote];
+
+  const merged: TimelineItem[] = [...remote];
+  const seen = new Set(merged.map(timelineItemKey));
+  for (const item of local) {
+    const key = timelineItemKey(item);
+    if (seen.has(key)) continue;
+    merged.push(item);
+    seen.add(key);
+  }
+  return merged;
+}
+
+function mergeAgentEntry(remote: AgentEntry | undefined, local: AgentEntry | undefined): AgentEntry | undefined {
+  if (!remote) return local ? { ...local, timeline: [...local.timeline] } : undefined;
+  if (!local) return remote;
+
+  const responseText = (() => {
+    const remoteText = remote.responseText?.trim() ?? '';
+    const localText = local.responseText?.trim() ?? '';
+    return localText.length > remoteText.length ? local.responseText : remote.responseText;
+  })();
+
+  return {
+    ...remote,
+    status:
+      remote.status !== 'running'
+        ? remote.status
+        : local.status === 'failed'
+          ? 'failed'
+          : 'running',
+    responseText,
+    errorMessage: remote.errorMessage ?? local.errorMessage,
+    timeline: mergeTimeline(remote.timeline, local.timeline),
+  };
+}
+
+function completeRunningTimelineItems(timeline: TimelineItem[]): TimelineItem[] {
+  return timeline.map((item) => {
+    if (item.kind === 'reasoning' && item.status === 'running') {
+      return { ...item, status: 'completed' };
+    }
+    if (item.kind === 'tool-call' && item.status === 'running') {
+      return { ...item, status: 'completed' };
+    }
+    return item;
+  });
+}
+
 function buildAgentStatusLine(entry: AgentEntry, indicatorSeconds: number): string | undefined {
   if (entry.status !== 'running') return undefined;
   const tool = [...entry.timeline]
@@ -668,6 +727,7 @@ function applyStreamEvent(current: ThreadMessage, event: JsonRpcNotification): T
 
   if (type === 'agent.text_delta') {
     const delta = typeof params?.delta === 'string' ? params.delta : '';
+    nextEntry.timeline = completeRunningTimelineItems(nextEntry.timeline);
     nextEntry.responseText = `${nextEntry.responseText ?? ''}${delta}`;
   }
 
@@ -703,10 +763,15 @@ function applyStreamEvent(current: ThreadMessage, event: JsonRpcNotification): T
     });
   }
 
+  if (type === 'agent.text_result') {
+    nextEntry.timeline = completeRunningTimelineItems(nextEntry.timeline);
+  }
+
   return {
     ...current,
     content: getAgentMessageContent(nextEntry),
     status: 'running',
+    statusLine: buildAgentStatusLine(nextEntry, 0),
     entry: nextEntry,
   };
 }
@@ -725,6 +790,8 @@ export function ThreadPane({ client, title = 'Feedback Desk' }: Props) {
   const [runStartedAt, setRunStartedAt] = useState<string | null>(null);
   const [streamDraft, setStreamDraft] = useState<StreamDraft | null>(null);
   const [runningTick, setRunningTick] = useState(0);
+  const turnHistoryRef = useRef<Record<string, AgentEntry>>({});
+  const streamDraftRef = useRef<StreamDraft | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   const elapsedSeconds = useMemo(() => {
@@ -755,22 +822,51 @@ export function ThreadPane({ client, title = 'Feedback Desk' }: Props) {
 
   const loadConversation = useCallback(async (sessionId: string) => {
     if (!sessionId || sessionId === 'new') {
-      setMessages([]);
-      setIsRunningRemote(false);
-      setRunStartedAt(null);
+      const currentDraft = streamDraftRef.current;
+      setMessages(currentDraft ? [currentDraft.userMessage, currentDraft.agentMessage] : []);
+      setIsRunningRemote(!!currentDraft);
+      setRunStartedAt(currentDraft?.startedAt ?? null);
       return;
     }
 
     setIsLoadingConversation(true);
     try {
       const result = (await client.getConversation(sessionId)) as ExtendedConversation;
-      const nextMessages = toThreadMessages(result, title, 0);
+      if (result.inProgress?.turnId && streamDraftRef.current?.agentMessage.entry) {
+        turnHistoryRef.current[result.inProgress.turnId] = mergeAgentEntry(
+          turnHistoryRef.current[result.inProgress.turnId],
+          streamDraftRef.current.agentMessage.entry,
+        ) ?? streamDraftRef.current.agentMessage.entry;
+      }
+
+      const nextMessages = toThreadMessages(result, title, 0).map((message) => {
+        if (message.role !== 'agent') return message;
+        const turnId = message.id.split(':')[0];
+        const localEntry = turnHistoryRef.current[turnId];
+        const mergedEntry = mergeAgentEntry(message.entry, localEntry);
+        if (!mergedEntry) return message;
+        const mergedStatus: ThreadMessage['status'] =
+          mergedEntry.status === 'running'
+            ? 'running'
+            : mergedEntry.status === 'failed'
+              ? 'failed'
+              : 'completed';
+        return {
+          ...message,
+          content: getAgentMessageContent(mergedEntry),
+          entry: mergedEntry,
+          status: mergedStatus,
+          statusLine: buildAgentStatusLine(mergedEntry, 0) ?? message.statusLine,
+        };
+      });
+
       setMessages(nextMessages);
       setIsRunningRemote(result.status === 'progress');
       setRunStartedAt(result.inProgress?.startedAt ?? null);
       setErrorMessage(null);
       if (result.status !== 'progress') {
         setStreamDraft(null);
+        streamDraftRef.current = null;
       }
     } catch (error) {
       setMessages([]);
@@ -826,6 +922,7 @@ export function ThreadPane({ client, title = 'Feedback Desk' }: Props) {
     setIsRunningRemote(false);
     setRunStartedAt(null);
     setStreamDraft(null);
+    streamDraftRef.current = null;
   }, []);
 
   const handleSubmit = useCallback(async () => {
@@ -861,11 +958,18 @@ export function ThreadPane({ client, title = 'Feedback Desk' }: Props) {
     setIsSubmitting(true);
     setIsRunningRemote(true);
     setRunStartedAt(startedAt);
-    setStreamDraft({ userMessage: optimisticUser, agentMessage: optimisticAgent, startedAt });
+    const nextStreamDraft: StreamDraft = {
+      userMessage: optimisticUser,
+      agentMessage: optimisticAgent,
+      startedAt,
+    };
+    setStreamDraft(nextStreamDraft);
+    streamDraftRef.current = nextStreamDraft;
     setMessages((prev) => [...prev, optimisticUser, optimisticAgent]);
 
     const abortController = new AbortController();
     abortRef.current = abortController;
+    let latestAgentEntry: AgentEntry = optimisticAgent.entry!;
 
     try {
       const result = await client.runAgent({
@@ -878,19 +982,37 @@ export function ThreadPane({ client, title = 'Feedback Desk' }: Props) {
             const next = [...previous];
             const last = next[next.length - 1];
             if (last?.role !== 'agent') return previous;
-            next[next.length - 1] = applyStreamEvent(last, event);
+            const nextMessage = applyStreamEvent(last, event);
+            latestAgentEntry = nextMessage.entry ?? latestAgentEntry;
+            next[next.length - 1] = nextMessage;
             return next;
           });
           setStreamDraft((current) => {
             if (!current) return current;
-            return {
+            const nextAgentMessage = applyStreamEvent(current.agentMessage, event);
+            latestAgentEntry = nextAgentMessage.entry ?? latestAgentEntry;
+            const nextDraft = {
               ...current,
-              agentMessage: applyStreamEvent(current.agentMessage, event),
+              agentMessage: nextAgentMessage,
             };
+            streamDraftRef.current = nextDraft;
+            return nextDraft;
           });
         },
       });
       abortRef.current = null;
+      if (result.turnId) {
+        turnHistoryRef.current[result.turnId] = mergeAgentEntry(
+          turnHistoryRef.current[result.turnId],
+          {
+            ...latestAgentEntry,
+            status: result.status === 'error' ? 'failed' : 'succeeded',
+          },
+        ) ?? {
+          ...latestAgentEntry,
+          status: result.status === 'error' ? 'failed' : 'succeeded',
+        };
+      }
       const nextSessionId = result.sessionId || selectedSessionId;
       setSelectedSessionId(nextSessionId);
       await Promise.all([loadConversation(nextSessionId), refreshSessions()]);
@@ -899,6 +1021,7 @@ export function ThreadPane({ client, title = 'Feedback Desk' }: Props) {
       if (abortController.signal.aborted) {
         setMessages((previous) => previous.filter((item) => item.id !== optimisticAgent.id));
         setStreamDraft(null);
+        streamDraftRef.current = null;
         return;
       }
       const message = error instanceof Error ? error.message : 'Failed to send message.';
@@ -919,6 +1042,8 @@ export function ThreadPane({ client, title = 'Feedback Desk' }: Props) {
       setErrorMessage(message);
       setIsRunningRemote(false);
       setRunStartedAt(null);
+      setStreamDraft(null);
+      streamDraftRef.current = null;
     } finally {
       setIsSubmitting(false);
     }
