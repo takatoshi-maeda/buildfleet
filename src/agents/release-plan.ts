@@ -61,10 +61,10 @@ function createSharedFileTools(workingDir: string) {
     workingDir,
     allowedPaths: [".", DEFAULT_DOCUMENTS_ROOT_DIR],
   });
-  const listDirectory = fileTools.find((tool) => tool.name === "ListDirectory");
-  const readFile = fileTools.find((tool) => tool.name === "ReadFile");
-  const writeFile = fileTools.find((tool) => tool.name === "WriteFile");
-  const makeDirectory = fileTools.find((tool) => tool.name === "MakeDirectory");
+  const listDirectory = fileTools.find((tool) => tool.name === "list_directory");
+  const readFile = fileTools.find((tool) => tool.name === "read_file");
+  const writeFile = fileTools.find((tool) => tool.name === "write_file");
+  const makeDirectory = fileTools.find((tool) => tool.name === "make_directory");
   if (!listDirectory || !readFile || !writeFile || !makeDirectory) {
     throw new Error("release-plan file tools are unavailable");
   }

@@ -694,10 +694,10 @@ describe("McpApiServer", () => {
         "backlog_item_get",
         "release_plan_create",
         "release_plan_list",
-        "ListDirectory",
-        "ReadFile",
-        "WriteFile",
-        "MakeDirectory",
+        "list_directory",
+        "read_file",
+        "write_file",
+        "make_directory",
       ]);
     } finally {
       await server.stop();
@@ -760,7 +760,7 @@ describe("McpApiServer", () => {
       expect(agentRun.result?.isError).toBe(false);
       expect(String(agentRun.result?.structuredContent?.message ?? "")).toContain("requirements captured");
       expect(streamInputs).toHaveLength(1);
-      expect(streamInputs[0]?.tools?.map((tool) => tool.name)).toEqual(["FindFiles", "Tree", "ListDirectory", "ReadFile", "WriteFile", "MakeDirectory"]);
+      expect(streamInputs[0]?.tools?.map((tool) => tool.name)).toEqual(["find_files", "tree", "list_directory", "read_file", "write_file", "make_directory"]);
     } finally {
       await server.stop();
     }
