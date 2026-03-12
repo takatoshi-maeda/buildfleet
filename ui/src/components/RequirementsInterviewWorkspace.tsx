@@ -1,7 +1,11 @@
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 
+import { decodeCodefleetWatchNotification } from '../mcp/decoders';
 import type { CodefleetClient } from '../mcp/client';
+import { useCodefleetBoard } from '../hooks/useCodefleetBoard';
 import { useCodefleetColors } from '../theme/useCodefleetColors';
+import { RequirementsDocumentPane } from './RequirementsDocumentPane';
 import { ThreadPane } from './ThreadPane';
 
 type Props = {
@@ -14,6 +18,95 @@ export function RequirementsInterviewWorkspace({ client }: Props) {
   const colors = useCodefleetColors();
   const { width } = useWindowDimensions();
   const isWide = width >= WIDE_LAYOUT_BREAKPOINT;
+  const board = useCodefleetBoard(client, true);
+  const refreshBoardRef = useRef(board.refreshBoard);
+
+  refreshBoardRef.current = board.refreshBoard;
+
+  useEffect(() => {
+    const abort = new AbortController();
+    const notificationToken = `requirements-interview-${Date.now().toString(16)}-${Math.random().toString(16).slice(2)}`;
+    let refreshQueued = false;
+
+    const scheduleRefresh = () => {
+      if (refreshQueued) {
+        return;
+      }
+      refreshQueued = true;
+      setTimeout(() => {
+        refreshQueued = false;
+        void refreshBoardRef.current();
+      }, 240);
+    };
+
+    void client.watchFleet(
+      { heartbeatSec: 15, notificationToken },
+      {
+        signal: abort.signal,
+        onNotification: (message) => {
+          const event = decodeCodefleetWatchNotification(message);
+          if (!event || event.params.notificationToken !== notificationToken) {
+            return;
+          }
+          if (event.method === 'backlog.snapshot' || event.method === 'backlog.changed') {
+            scheduleRefresh();
+          }
+        },
+      },
+    ).catch(() => undefined);
+
+    return () => abort.abort();
+  }, [client]);
+
+  const totalItems = useMemo(
+    () => Object.values(board.itemsByEpicId).reduce((count, items) => count + items.length, 0),
+    [board.itemsByEpicId],
+  );
+  const hasArtifacts = board.epics.length > 0 || totalItems > 0;
+
+  const renderArtifactsPane = useCallback(() => {
+    if (board.isLoading && !hasArtifacts) {
+      return null;
+    }
+    if (!hasArtifacts) {
+      return null;
+    }
+
+    return (
+      <View
+        style={[
+          styles.artifactsPane,
+          isWide ? [styles.paneWide, styles.artifactsPaneWide] : styles.artifactsPaneStacked,
+          { backgroundColor: colors.surface, borderRightColor: colors.surfaceBorder, borderBottomColor: colors.surfaceBorder },
+        ]}
+      >
+        <View style={[styles.artifactsHeader, { borderBottomColor: colors.surfaceBorder }]}>
+          <Text style={[styles.artifactsEyebrow, { color: colors.mutedText }]}>Artifacts</Text>
+          <Text style={[styles.artifactsTitle, { color: colors.text }]}>
+            {board.epics.length} epics / {totalItems} items
+          </Text>
+        </View>
+        <View style={styles.artifactsBody}>
+          {board.epics.slice(0, 8).map((epic) => {
+            const itemCount = board.itemsByEpicId[epic.id]?.length ?? 0;
+            return (
+              <View key={epic.id} style={[styles.artifactCard, { borderColor: colors.surfaceBorder, backgroundColor: colors.background }]}>
+                <Text style={[styles.artifactStatus, { color: colors.mutedText }]}>
+                  {(epic.status ?? 'todo').toUpperCase()}
+                </Text>
+                <Text style={[styles.artifactTitle, { color: colors.text }]} numberOfLines={2}>
+                  {epic.title}
+                </Text>
+                <Text style={[styles.artifactMeta, { color: colors.mutedText }]}>
+                  {epic.id} · {itemCount} items
+                </Text>
+              </View>
+            );
+          })}
+        </View>
+      </View>
+    );
+  }, [board.epics, board.isLoading, board.itemsByEpicId, colors.background, colors.mutedText, colors.surface, colors.surfaceBorder, colors.text, hasArtifacts, isWide, totalItems]);
 
   return (
     <View
@@ -23,33 +116,23 @@ export function RequirementsInterviewWorkspace({ client }: Props) {
         { backgroundColor: colors.background },
       ]}
     >
+      {renderArtifactsPane()}
       <View
         style={[
           styles.conversationPane,
-          isWide ? [styles.paneWide, styles.conversationPaneWide] : styles.conversationPaneStacked,
+          isWide
+            ? [
+                hasArtifacts ? styles.conversationPaneWideWithArtifacts : styles.conversationPaneWide,
+                styles.conversationPaneWideBorder,
+              ]
+            : styles.conversationPaneStacked,
           { borderRightColor: colors.surfaceBorder, borderBottomColor: colors.surfaceBorder },
         ]}
       >
         <ThreadPane client={client} title="" agentId="requirements-interviewer" />
       </View>
-
-      <View
-        style={[
-          styles.artifactsPane,
-          isWide ? styles.paneWide : null,
-          { backgroundColor: colors.surface },
-        ]}
-      >
-        <View style={[styles.artifactsHeader, { borderBottomColor: colors.surfaceBorder }]}>
-          <Text style={[styles.artifactsEyebrow, { color: colors.mutedText }]}>Artifacts</Text>
-          <Text style={[styles.artifactsTitle, { color: colors.text }]}>Planned Area</Text>
-        </View>
-        <View style={styles.emptyState}>
-          <Text style={[styles.emptyTitle, { color: colors.text }]}>Artifacts pane is empty</Text>
-          <Text style={[styles.emptyBody, { color: colors.mutedText }]}>
-            What appears here will be decided as the workflow takes shape.
-          </Text>
-        </View>
+      <View style={[styles.documentPane, isWide ? styles.documentPaneWide : styles.documentPaneStacked]}>
+        <RequirementsDocumentPane client={client} />
       </View>
     </View>
   );
@@ -72,6 +155,12 @@ const styles = StyleSheet.create({
     minHeight: 0,
   },
   conversationPaneWide: {
+    flex: 2,
+  },
+  conversationPaneWideWithArtifacts: {
+    flex: 2,
+  },
+  conversationPaneWideBorder: {
     borderRightWidth: 1,
   },
   conversationPaneStacked: {
@@ -80,12 +169,30 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
   },
   artifactsPane: {
-    flex: 1,
     minWidth: 0,
     minHeight: 0,
   },
+  artifactsPaneWide: {
+    flex: 1,
+    borderRightWidth: 1,
+  },
+  artifactsPaneStacked: {
+    borderBottomWidth: 1,
+    maxHeight: 280,
+  },
   paneWide: {
     flex: 1,
+  },
+  documentPane: {
+    minWidth: 0,
+    minHeight: 0,
+  },
+  documentPaneWide: {
+    flex: 1,
+  },
+  documentPaneStacked: {
+    flex: 1,
+    minHeight: 320,
   },
   artifactsHeader: {
     minHeight: 72,
@@ -105,21 +212,28 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '700',
   },
-  emptyState: {
+  artifactsBody: {
     flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 28,
+    padding: 14,
+    gap: 10,
   },
-  emptyTitle: {
+  artifactCard: {
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 12,
+    gap: 6,
+  },
+  artifactStatus: {
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.7,
+  },
+  artifactTitle: {
     fontSize: 16,
     fontWeight: '700',
-    textAlign: 'center',
   },
-  emptyBody: {
-    marginTop: 8,
-    fontSize: 14,
-    lineHeight: 20,
-    textAlign: 'center',
+  artifactMeta: {
+    fontSize: 12,
+    fontWeight: '500',
   },
 });
