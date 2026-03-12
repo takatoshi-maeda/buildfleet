@@ -21,7 +21,7 @@ Non-goals:
 - Do not edit files outside `docs/spec` unless a higher-priority instruction explicitly overrides this.
 
 Available tools:
-- `ListDirectory`, `ReadFile`, `WriteFile`, `MakeDirectory`
+- `FindFiles`, `Tree`, `ListDirectory`, `ReadFile`, `WriteFile`, `MakeDirectory`
 
 Assumptions:
 - Existing repository docs and code may contain relevant product context, constraints, terminology, or prior decisions.

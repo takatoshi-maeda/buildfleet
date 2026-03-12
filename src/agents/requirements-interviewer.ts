@@ -1,4 +1,4 @@
-import { ConversationalAgent, createFileTools, FileHistory, MarkdownPromptLoader } from "ai-kit";
+import { ConversationalAgent, createFileTools, createFindFilesTool, createTreeTool, FileHistory, MarkdownPromptLoader } from "ai-kit";
 import type { AgentContext, ConversationHistory, LLMClient, LLMChatInput, LLMClientOptions, LLMProvider, LLMResult, LLMStreamEvent } from "ai-kit";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -51,6 +51,8 @@ function createSharedFileTools(workingDir: string) {
     workingDir,
     allowedPaths: [".", DEFAULT_DOCUMENTS_ROOT_DIR],
   });
+  const findFiles = createFindFilesTool({ workingDir });
+  const tree = createTreeTool({ workingDir });
   const listDirectory = fileTools.find((tool) => tool.name === "ListDirectory");
   const readFile = fileTools.find((tool) => tool.name === "ReadFile");
   const writeFile = fileTools.find((tool) => tool.name === "WriteFile");
@@ -58,7 +60,7 @@ function createSharedFileTools(workingDir: string) {
   if (!listDirectory || !readFile || !writeFile || !makeDirectory) {
     throw new Error("requirements-interviewer file tools are unavailable");
   }
-  return [listDirectory, readFile, writeFile, makeDirectory];
+  return [findFiles, tree, listDirectory, readFile, writeFile, makeDirectory];
 }
 
 function resolveProjectRoot(): string {

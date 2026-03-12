@@ -760,7 +760,7 @@ describe("McpApiServer", () => {
       expect(agentRun.result?.isError).toBe(false);
       expect(String(agentRun.result?.structuredContent?.message ?? "")).toContain("requirements captured");
       expect(streamInputs).toHaveLength(1);
-      expect(streamInputs[0]?.tools?.map((tool) => tool.name)).toEqual(["ListDirectory", "ReadFile", "WriteFile", "MakeDirectory"]);
+      expect(streamInputs[0]?.tools?.map((tool) => tool.name)).toEqual(["FindFiles", "Tree", "ListDirectory", "ReadFile", "WriteFile", "MakeDirectory"]);
     } finally {
       await server.stop();
     }
