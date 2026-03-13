@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 
 import { decodeCodefleetWatchNotification } from '../mcp/decoders';
 import type { CodefleetClient, JsonRpcNotification } from '../mcp/client';
@@ -16,6 +17,7 @@ const WIDE_LAYOUT_BREAKPOINT = 1120;
 
 type StreamingArtifact = {
   id: string;
+  path?: string;
   text: string;
   status: 'running' | 'completed';
   contentType: 'artifact';
@@ -48,6 +50,14 @@ function classifyPatchLine(line: string): PatchLineTone {
   return 'plain';
 }
 
+function fileNameFromPath(path?: string): string | null {
+  if (!path) {
+    return null;
+  }
+  const segments = path.split('/').filter(Boolean);
+  return segments.length > 0 ? segments[segments.length - 1] : path;
+}
+
 export function RequirementsInterviewWorkspace({ client }: Props) {
   const colors = useCodefleetColors();
   const { width } = useWindowDimensions();
@@ -55,6 +65,7 @@ export function RequirementsInterviewWorkspace({ client }: Props) {
   const board = useCodefleetBoard(client, true);
   const refreshBoardRef = useRef(board.refreshBoard);
   const [streamingArtifacts, setStreamingArtifacts] = useState<StreamingArtifact[]>([]);
+  const [collapsedArtifactIds, setCollapsedArtifactIds] = useState<Set<string>>(() => new Set());
 
   refreshBoardRef.current = board.refreshBoard;
 
@@ -109,6 +120,11 @@ export function RequirementsInterviewWorkspace({ client }: Props) {
 
     if (type === 'agent.output_item.added') {
       const itemId = typeof params?.itemId === 'string' ? params.itemId : null;
+      const item =
+        params?.item && typeof params.item === 'object'
+          ? (params.item as Record<string, unknown>)
+          : null;
+      const path = typeof item?.path === 'string' ? item.path : undefined;
       if (!itemId) {
         return;
       }
@@ -117,6 +133,7 @@ export function RequirementsInterviewWorkspace({ client }: Props) {
         const existingIndex = next.findIndex((artifact) => artifact.id === itemId);
         const nextArtifact: StreamingArtifact = {
           id: itemId,
+          path: path ?? (existingIndex >= 0 ? next[existingIndex].path : undefined),
           text: existingIndex >= 0 ? next[existingIndex].text : '',
           status: 'running',
           contentType: 'artifact',
@@ -164,6 +181,11 @@ export function RequirementsInterviewWorkspace({ client }: Props) {
 
     if (type === 'agent.output_item.done') {
       const itemId = typeof params?.itemId === 'string' ? params.itemId : null;
+      const item =
+        params?.item && typeof params.item === 'object'
+          ? (params.item as Record<string, unknown>)
+          : null;
+      const path = typeof item?.path === 'string' ? item.path : undefined;
       if (!itemId) {
         return;
       }
@@ -171,7 +193,7 @@ export function RequirementsInterviewWorkspace({ client }: Props) {
         previous
           .map((artifact) =>
             artifact.id === itemId
-              ? { ...artifact, status: 'completed', updatedAt: Date.now() }
+              ? { ...artifact, path: path ?? artifact.path, status: 'completed', updatedAt: Date.now() }
               : artifact,
           )
           .sort((a, b) => b.updatedAt - a.updatedAt),
@@ -208,13 +230,46 @@ export function RequirementsInterviewWorkspace({ client }: Props) {
                 { borderColor: colors.surfaceBorder, backgroundColor: colors.background },
               ]}
             >
-              <Text style={[styles.artifactStatus, { color: colors.mutedText }]}>
-                {artifact.status === 'running' ? 'STREAMING PATCH' : 'PATCH'}
-              </Text>
-              <Text style={[styles.artifactTitle, { color: colors.text }]} numberOfLines={1}>
-                {artifact.id}
-              </Text>
-              {artifact.text.trim() ? (
+              <Pressable
+                style={styles.artifactHeaderRow}
+                onPress={() =>
+                  setCollapsedArtifactIds((previous) => {
+                    const next = new Set(previous);
+                    if (next.has(artifact.id)) {
+                      next.delete(artifact.id);
+                    } else {
+                      next.add(artifact.id);
+                    }
+                    return next;
+                  })
+                }
+              >
+                <View style={styles.artifactHeaderMain}>
+                  {artifact.status === 'running' ? (
+                    <ActivityIndicator
+                      size="small"
+                      color={colors.mutedText}
+                      style={styles.artifactSpinner}
+                    />
+                  ) : null}
+                  <View style={styles.artifactHeaderText}>
+                    <Text style={[styles.artifactTitle, { color: colors.text }]} numberOfLines={1}>
+                      {fileNameFromPath(artifact.path) ?? artifact.id}
+                    </Text>
+                    {artifact.path ? (
+                      <Text style={[styles.artifactMeta, { color: colors.mutedText }]} numberOfLines={1}>
+                        {artifact.path}
+                      </Text>
+                    ) : null}
+                  </View>
+                </View>
+                <Ionicons
+                  name={collapsedArtifactIds.has(artifact.id) ? 'chevron-forward' : 'chevron-down'}
+                  size={16}
+                  color={colors.mutedText}
+                />
+              </Pressable>
+              {!collapsedArtifactIds.has(artifact.id) && artifact.text.trim() ? (
                 <View
                   style={[
                     styles.patchPreview,
@@ -262,11 +317,11 @@ export function RequirementsInterviewWorkspace({ client }: Props) {
                     );
                   })}
                 </View>
-              ) : (
+              ) : !collapsedArtifactIds.has(artifact.id) ? (
                 <Text style={[styles.streamingArtifactPlaceholder, { color: colors.mutedText }]}>
                   Waiting for patch content...
                 </Text>
-              )}
+              ) : null}
             </View>
           ))}
           {board.epics.slice(0, 8).map((epic) => {
@@ -288,7 +343,7 @@ export function RequirementsInterviewWorkspace({ client }: Props) {
         </ScrollView>
       </View>
     );
-  }, [board.epics, board.isLoading, board.itemsByEpicId, colors.background, colors.mutedText, colors.surface, colors.surfaceBorder, colors.text, hasArtifacts, hasStreamingArtifacts, isWide, streamingArtifacts, totalItems]);
+  }, [board.epics, board.isLoading, board.itemsByEpicId, collapsedArtifactIds, colors.background, colors.mutedText, colors.surface, colors.surfaceBorder, colors.text, hasArtifacts, hasStreamingArtifacts, isWide, streamingArtifacts, totalItems]);
 
   return (
     <View
@@ -412,6 +467,26 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     padding: 12,
     gap: 6,
+  },
+  artifactHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  artifactHeaderMain: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+  },
+  artifactHeaderText: {
+    flex: 1,
+    minWidth: 0,
+  },
+  artifactSpinner: {
+    marginTop: 2,
   },
   streamingArtifactCard: {
     overflow: 'hidden',
