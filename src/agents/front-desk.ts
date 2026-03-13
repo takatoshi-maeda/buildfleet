@@ -44,7 +44,7 @@ interface ResolvedCodefleetFrontDeskRuntimeConfig {
 }
 
 const DEFAULT_LLM_PROVIDER: LLMProvider = "openai";
-const DEFAULT_LLM_MODEL = "gpt-5.3-codex";
+const DEFAULT_LLM_MODEL = "gpt-5.4";
 const DEFAULT_MAX_TURNS = 6;
 const DEFAULT_RELEASE_PLANS_DIR = ".codefleet/data/release-plan";
 const DEFAULT_HISTORY_BASE_DIR = ".codefleet/runtime/front-desk-history";
