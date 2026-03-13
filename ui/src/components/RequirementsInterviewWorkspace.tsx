@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react';
-import { StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 
 import { decodeCodefleetWatchNotification } from '../mcp/decoders';
-import type { CodefleetClient } from '../mcp/client';
+import type { CodefleetClient, JsonRpcNotification } from '../mcp/client';
 import { useCodefleetBoard } from '../hooks/useCodefleetBoard';
 import { useCodefleetColors } from '../theme/useCodefleetColors';
 import { RequirementsDocumentPane } from './RequirementsDocumentPane';
@@ -14,12 +14,47 @@ type Props = {
 
 const WIDE_LAYOUT_BREAKPOINT = 1120;
 
+type StreamingArtifact = {
+  id: string;
+  text: string;
+  status: 'running' | 'completed';
+  contentType: 'artifact';
+  updatedAt: number;
+};
+
+type PatchLineTone = 'meta' | 'add' | 'remove' | 'context' | 'plain';
+
+function classifyPatchLine(line: string): PatchLineTone {
+  if (
+    line.startsWith('*** Begin Patch') ||
+    line.startsWith('*** End Patch') ||
+    line.startsWith('*** Update File:') ||
+    line.startsWith('*** Add File:') ||
+    line.startsWith('*** Delete File:') ||
+    line.startsWith('*** Move to:') ||
+    line.startsWith('@@')
+  ) {
+    return 'meta';
+  }
+  if (line.startsWith('+')) {
+    return 'add';
+  }
+  if (line.startsWith('-')) {
+    return 'remove';
+  }
+  if (line.startsWith(' ')) {
+    return 'context';
+  }
+  return 'plain';
+}
+
 export function RequirementsInterviewWorkspace({ client }: Props) {
   const colors = useCodefleetColors();
   const { width } = useWindowDimensions();
   const isWide = width >= WIDE_LAYOUT_BREAKPOINT;
   const board = useCodefleetBoard(client, true);
   const refreshBoardRef = useRef(board.refreshBoard);
+  const [streamingArtifacts, setStreamingArtifacts] = useState<StreamingArtifact[]>([]);
 
   refreshBoardRef.current = board.refreshBoard;
 
@@ -63,12 +98,92 @@ export function RequirementsInterviewWorkspace({ client }: Props) {
     [board.itemsByEpicId],
   );
   const hasArtifacts = board.epics.length > 0 || totalItems > 0;
+  const hasStreamingArtifacts = streamingArtifacts.length > 0;
+
+  const handleThreadStreamEvent = useCallback((message: JsonRpcNotification) => {
+    const params =
+      message.params && typeof message.params === 'object'
+        ? (message.params as Record<string, unknown>)
+        : null;
+    const type = typeof params?.type === 'string' ? params.type : '';
+
+    if (type === 'agent.output_item.added') {
+      const itemId = typeof params?.itemId === 'string' ? params.itemId : null;
+      if (!itemId) {
+        return;
+      }
+      setStreamingArtifacts((previous) => {
+        const next = [...previous];
+        const existingIndex = next.findIndex((artifact) => artifact.id === itemId);
+        const nextArtifact: StreamingArtifact = {
+          id: itemId,
+          text: existingIndex >= 0 ? next[existingIndex].text : '',
+          status: 'running',
+          contentType: 'artifact',
+          updatedAt: Date.now(),
+        };
+        if (existingIndex >= 0) {
+          next[existingIndex] = nextArtifact;
+        } else {
+          next.push(nextArtifact);
+        }
+        return next.sort((a, b) => b.updatedAt - a.updatedAt);
+      });
+      return;
+    }
+
+    if (type === 'agent.artifact_delta') {
+      const itemId = typeof params?.itemId === 'string' ? params.itemId : null;
+      const delta = typeof params?.delta === 'string' ? params.delta : '';
+      if (!itemId || delta.length === 0) {
+        return;
+      }
+      setStreamingArtifacts((previous) => {
+        const next = [...previous];
+        const existingIndex = next.findIndex((artifact) => artifact.id === itemId);
+        if (existingIndex >= 0) {
+          next[existingIndex] = {
+            ...next[existingIndex],
+            text: `${next[existingIndex].text}${delta}`,
+            status: 'running',
+            updatedAt: Date.now(),
+          };
+        } else {
+          next.push({
+            id: itemId,
+            text: delta,
+            status: 'running',
+            contentType: 'artifact',
+            updatedAt: Date.now(),
+          });
+        }
+        return next.sort((a, b) => b.updatedAt - a.updatedAt);
+      });
+      return;
+    }
+
+    if (type === 'agent.output_item.done') {
+      const itemId = typeof params?.itemId === 'string' ? params.itemId : null;
+      if (!itemId) {
+        return;
+      }
+      setStreamingArtifacts((previous) =>
+        previous
+          .map((artifact) =>
+            artifact.id === itemId
+              ? { ...artifact, status: 'completed', updatedAt: Date.now() }
+              : artifact,
+          )
+          .sort((a, b) => b.updatedAt - a.updatedAt),
+      );
+    }
+  }, []);
 
   const renderArtifactsPane = useCallback(() => {
-    if (board.isLoading && !hasArtifacts) {
+    if (board.isLoading && !hasArtifacts && !hasStreamingArtifacts) {
       return null;
     }
-    if (!hasArtifacts) {
+    if (!hasArtifacts && !hasStreamingArtifacts) {
       return null;
     }
 
@@ -82,11 +197,78 @@ export function RequirementsInterviewWorkspace({ client }: Props) {
       >
         <View style={[styles.artifactsHeader, { borderBottomColor: colors.surfaceBorder }]}>
           <Text style={[styles.artifactsEyebrow, { color: colors.mutedText }]}>Artifacts</Text>
-          <Text style={[styles.artifactsTitle, { color: colors.text }]}>
-            {board.epics.length} epics / {totalItems} items
-          </Text>
         </View>
-        <View style={styles.artifactsBody}>
+        <ScrollView style={styles.artifactsScroll} contentContainerStyle={styles.artifactsBody}>
+          {streamingArtifacts.map((artifact) => (
+            <View
+              key={artifact.id}
+              style={[
+                styles.artifactCard,
+                styles.streamingArtifactCard,
+                { borderColor: colors.surfaceBorder, backgroundColor: colors.background },
+              ]}
+            >
+              <Text style={[styles.artifactStatus, { color: colors.mutedText }]}>
+                {artifact.status === 'running' ? 'STREAMING PATCH' : 'PATCH'}
+              </Text>
+              <Text style={[styles.artifactTitle, { color: colors.text }]} numberOfLines={1}>
+                {artifact.id}
+              </Text>
+              {artifact.text.trim() ? (
+                <View
+                  style={[
+                    styles.patchPreview,
+                    {
+                      backgroundColor: `${colors.surfaceBorder}14`,
+                      borderColor: colors.surfaceBorder,
+                    },
+                  ]}
+                >
+                  {artifact.text.split('\n').map((line, index) => {
+                    const tone = classifyPatchLine(line);
+                    const textColor =
+                      tone === 'add'
+                        ? '#166534'
+                        : tone === 'remove'
+                          ? '#991b1b'
+                          : tone === 'meta'
+                            ? '#1d4ed8'
+                            : colors.text;
+                    const lineBackgroundColor =
+                      tone === 'add'
+                        ? '#dcfce7'
+                        : tone === 'remove'
+                          ? '#fee2e2'
+                          : tone === 'meta'
+                            ? '#dbeafe'
+                            : tone === 'context'
+                              ? `${colors.surfaceBorder}12`
+                              : 'transparent';
+
+                    return (
+                      <Text
+                        key={`${artifact.id}-line-${index}`}
+                        style={[
+                          styles.streamingArtifactBody,
+                          styles.patchLine,
+                          {
+                            color: textColor,
+                            backgroundColor: lineBackgroundColor,
+                          },
+                        ]}
+                      >
+                        {line || ' '}
+                      </Text>
+                    );
+                  })}
+                </View>
+              ) : (
+                <Text style={[styles.streamingArtifactPlaceholder, { color: colors.mutedText }]}>
+                  Waiting for patch content...
+                </Text>
+              )}
+            </View>
+          ))}
           {board.epics.slice(0, 8).map((epic) => {
             const itemCount = board.itemsByEpicId[epic.id]?.length ?? 0;
             return (
@@ -103,10 +285,10 @@ export function RequirementsInterviewWorkspace({ client }: Props) {
               </View>
             );
           })}
-        </View>
+        </ScrollView>
       </View>
     );
-  }, [board.epics, board.isLoading, board.itemsByEpicId, colors.background, colors.mutedText, colors.surface, colors.surfaceBorder, colors.text, hasArtifacts, isWide, totalItems]);
+  }, [board.epics, board.isLoading, board.itemsByEpicId, colors.background, colors.mutedText, colors.surface, colors.surfaceBorder, colors.text, hasArtifacts, hasStreamingArtifacts, isWide, streamingArtifacts, totalItems]);
 
   return (
     <View
@@ -116,7 +298,6 @@ export function RequirementsInterviewWorkspace({ client }: Props) {
         { backgroundColor: colors.background },
       ]}
     >
-      {renderArtifactsPane()}
       <View
         style={[
           styles.conversationPane,
@@ -129,8 +310,15 @@ export function RequirementsInterviewWorkspace({ client }: Props) {
           { borderRightColor: colors.surfaceBorder, borderBottomColor: colors.surfaceBorder },
         ]}
       >
-        <ThreadPane client={client} title="" agentId="requirements-interviewer" />
+        <ThreadPane
+          client={client}
+          title=""
+          agentId="requirements-interviewer"
+          artifactDisplayMode="external"
+          onStreamEvent={handleThreadStreamEvent}
+        />
       </View>
+      {renderArtifactsPane()}
       <View style={[styles.documentPane, isWide ? styles.documentPaneWide : styles.documentPaneStacked]}>
         <RequirementsDocumentPane client={client} />
       </View>
@@ -213,15 +401,20 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   artifactsBody: {
-    flex: 1,
     padding: 14,
     gap: 10,
+  },
+  artifactsScroll: {
+    flex: 1,
   },
   artifactCard: {
     borderWidth: 1,
     borderRadius: 14,
     padding: 12,
     gap: 6,
+  },
+  streamingArtifactCard: {
+    overflow: 'hidden',
   },
   artifactStatus: {
     fontSize: 11,
@@ -235,5 +428,23 @@ const styles = StyleSheet.create({
   artifactMeta: {
     fontSize: 12,
     fontWeight: '500',
+  },
+  streamingArtifactBody: {
+    fontSize: 12,
+    lineHeight: 18,
+    fontFamily: 'monospace',
+  },
+  streamingArtifactPlaceholder: {
+    fontSize: 12,
+    fontStyle: 'italic',
+  },
+  patchPreview: {
+    borderWidth: 1,
+    borderRadius: 10,
+    overflow: 'hidden',
+  },
+  patchLine: {
+    paddingHorizontal: 10,
+    paddingVertical: 3,
   },
 });

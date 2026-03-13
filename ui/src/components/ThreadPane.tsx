@@ -27,6 +27,8 @@ type Props = {
   client: CodefleetClient;
   title?: string;
   agentId?: string;
+  artifactDisplayMode?: 'timeline' | 'external';
+  onStreamEvent?: (event: JsonRpcNotification) => void;
 };
 
 type ContentPart = { type: 'text'; text: string } | { type: 'image'; url: string };
@@ -762,12 +764,17 @@ function Composer({
   );
 }
 
-function applyStreamEvent(current: ThreadMessage, event: JsonRpcNotification): ThreadMessage {
+function applyStreamEvent(
+  current: ThreadMessage,
+  event: JsonRpcNotification,
+  options: { artifactDisplayMode?: 'timeline' | 'external' } = {},
+): ThreadMessage {
   const params =
     event.params && typeof event.params === 'object'
       ? (event.params as Record<string, unknown>)
       : null;
   const type = typeof params?.type === 'string' ? params.type : '';
+  const artifactDisplayMode = options.artifactDisplayMode ?? 'timeline';
   const nextEntry: AgentEntry = current.entry
     ? { ...current.entry, timeline: [...current.entry.timeline] }
     : { kind: 'agent-response', status: 'running', timeline: [] };
@@ -793,7 +800,7 @@ function applyStreamEvent(current: ThreadMessage, event: JsonRpcNotification): T
     }
   }
 
-  if (type === 'agent.output_item.added') {
+  if (type === 'agent.output_item.added' && artifactDisplayMode === 'timeline') {
     const itemId = typeof params?.itemId === 'string' ? params.itemId : messageId('artifact');
     const contentType = params?.content_type === 'artifact' ? 'artifact' : 'artifact';
     const existingIndex = nextEntry.timeline.findIndex((item) => item.kind === 'artifact' && item.id === itemId);
@@ -814,7 +821,7 @@ function applyStreamEvent(current: ThreadMessage, event: JsonRpcNotification): T
     }
   }
 
-  if (type === 'agent.artifact_delta') {
+  if (type === 'agent.artifact_delta' && artifactDisplayMode === 'timeline') {
     const itemId = typeof params?.itemId === 'string' ? params.itemId : undefined;
     const delta = typeof params?.delta === 'string' ? params.delta : '';
     if (itemId) {
@@ -840,7 +847,7 @@ function applyStreamEvent(current: ThreadMessage, event: JsonRpcNotification): T
     }
   }
 
-  if (type === 'agent.output_item.done') {
+  if (type === 'agent.output_item.done' && artifactDisplayMode === 'timeline') {
     const itemId = typeof params?.itemId === 'string' ? params.itemId : undefined;
     if (itemId) {
       const existingIndex = nextEntry.timeline.findIndex((item) => item.kind === 'artifact' && item.id === itemId);
@@ -925,7 +932,13 @@ function applyStreamEvent(current: ThreadMessage, event: JsonRpcNotification): T
   };
 }
 
-export function ThreadPane({ client, title = 'Feedback Desk', agentId }: Props) {
+export function ThreadPane({
+  client,
+  title = 'Feedback Desk',
+  agentId,
+  artifactDisplayMode = 'timeline',
+  onStreamEvent,
+}: Props) {
   const colors = useCodefleetColors();
   const [sessions, setSessions] = useState<ConversationSummary[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState('new');
@@ -1128,19 +1141,20 @@ export function ThreadPane({ client, title = 'Feedback Desk', agentId }: Props) 
         sessionId: selectedSessionId === 'new' ? undefined : selectedSessionId,
         signal: abortController.signal,
         onStreamEvent: (event) => {
+          onStreamEvent?.(event);
           setMessages((previous) => {
             if (previous.length === 0) return previous;
             const next = [...previous];
             const last = next[next.length - 1];
             if (last?.role !== 'agent') return previous;
-            const nextMessage = applyStreamEvent(last, event);
+            const nextMessage = applyStreamEvent(last, event, { artifactDisplayMode });
             latestAgentEntry = nextMessage.entry ?? latestAgentEntry;
             next[next.length - 1] = nextMessage;
             return next;
           });
           setStreamDraft((current) => {
             if (!current) return current;
-            const nextAgentMessage = applyStreamEvent(current.agentMessage, event);
+            const nextAgentMessage = applyStreamEvent(current.agentMessage, event, { artifactDisplayMode });
             latestAgentEntry = nextAgentMessage.entry ?? latestAgentEntry;
             const nextDraft = {
               ...current,
@@ -1198,7 +1212,7 @@ export function ThreadPane({ client, title = 'Feedback Desk', agentId }: Props) 
     } finally {
       setIsSubmitting(false);
     }
-  }, [agentId, client, draft, isSubmitting, loadConversation, refreshSessions, selectedSessionId, title]);
+  }, [agentId, artifactDisplayMode, client, draft, isSubmitting, loadConversation, onStreamEvent, refreshSessions, selectedSessionId, title]);
 
   return (
     <View style={[styles.container, { backgroundColor: colors.surface }]}>
