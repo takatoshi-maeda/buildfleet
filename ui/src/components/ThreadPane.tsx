@@ -54,6 +54,13 @@ type TimelineItem =
       updatedAt?: number;
       completedAt?: number;
       durationSeconds?: number;
+    }
+  | {
+      id: string;
+      kind: 'artifact';
+      text: string;
+      contentType: 'artifact';
+      status: 'running' | 'completed';
     };
 
 type AgentEntry = {
@@ -155,6 +162,7 @@ function timelineItemKey(item: TimelineItem): string {
   if (item.kind === 'tool-call') {
     return `tool:${item.summary}:${item.argumentLines?.join('\n') ?? ''}:${item.errorMessage ?? ''}`;
   }
+  if (item.kind === 'artifact') return `artifact:${item.text}`;
   return `text:${item.text}`;
 }
 
@@ -210,6 +218,9 @@ function completeRunningTimelineItems(
       return { ...item, status: 'completed' };
     }
     if (options.toolCalls && item.kind === 'tool-call' && item.status === 'running') {
+      return { ...item, status: 'completed' };
+    }
+    if (item.kind === 'artifact' && item.status === 'running') {
       return { ...item, status: 'completed' };
     }
     return item;
@@ -415,6 +426,26 @@ function InlineTimelineItem({
     );
   }
 
+  if (item.kind === 'artifact') {
+    return (
+      <View style={tlStyles.item}>
+        <View style={tlStyles.header}>
+          <TimelineDot running={item.status === 'running'} colors={colors} />
+          <Text style={[tlStyles.label, { color: colors.text }]}>Patch</Text>
+        </View>
+        {item.text.trim().length > 0 ? (
+          <View style={tlStyles.args}>
+            {item.text.split('\n').map((line, i) => (
+              <Text key={i} style={[tlStyles.argLine, { color: colors.mutedText }]}>
+                {line || ' '}
+              </Text>
+            ))}
+          </View>
+        ) : null}
+      </View>
+    );
+  }
+
   if (!item.text.trim()) return null;
   return (
     <View style={tlStyles.responseBlock}>
@@ -440,9 +471,10 @@ function AgentInlineTimeline({
   if (timeline.length === 0 && !isRunning) return null;
 
   const hasThinkingOrTool = timeline.some((t) => t.kind === 'reasoning' || t.kind === 'tool-call');
+  const hasArtifact = timeline.some((t) => t.kind === 'artifact');
   const hasTimelineText = timeline.some((t) => t.kind === 'text' && t.text.trim().length > 0);
   const hasResponseText = !!entry.responseText?.trim();
-  const showSyntheticThinking = isRunning && !hasThinkingOrTool && !hasResponseText;
+  const showSyntheticThinking = isRunning && !hasThinkingOrTool && !hasArtifact && !hasResponseText;
   const hiddenCount = expanded ? 0 : Math.max(0, timeline.length - INITIAL_VISIBLE_TIMELINE);
   const visibleItems = expanded ? timeline : timeline.slice(hiddenCount);
   const durationText = isRunning
@@ -758,6 +790,77 @@ function applyStreamEvent(current: ThreadMessage, event: JsonRpcNotification): T
         text: delta,
         status: 'running',
       });
+    }
+  }
+
+  if (type === 'agent.output_item.added') {
+    const itemId = typeof params?.itemId === 'string' ? params.itemId : messageId('artifact');
+    const contentType = params?.content_type === 'artifact' ? 'artifact' : 'artifact';
+    const existingIndex = nextEntry.timeline.findIndex((item) => item.kind === 'artifact' && item.id === itemId);
+    if (existingIndex >= 0) {
+      nextEntry.timeline[existingIndex] = {
+        ...nextEntry.timeline[existingIndex],
+        contentType,
+        status: 'running',
+      } as Extract<TimelineItem, { kind: 'artifact' }>;
+    } else {
+      nextEntry.timeline.push({
+        id: itemId,
+        kind: 'artifact',
+        text: '',
+        contentType,
+        status: 'running',
+      });
+    }
+  }
+
+  if (type === 'agent.artifact_delta') {
+    const itemId = typeof params?.itemId === 'string' ? params.itemId : undefined;
+    const delta = typeof params?.delta === 'string' ? params.delta : '';
+    if (itemId) {
+      const existingIndex = nextEntry.timeline.findIndex((item) => item.kind === 'artifact' && item.id === itemId);
+      if (existingIndex >= 0) {
+        const existing = nextEntry.timeline[existingIndex];
+        if (existing.kind === 'artifact') {
+          nextEntry.timeline[existingIndex] = {
+            ...existing,
+            text: `${existing.text}${delta}`,
+            status: 'running',
+          };
+        }
+      } else {
+        nextEntry.timeline.push({
+          id: itemId,
+          kind: 'artifact',
+          text: delta,
+          contentType: 'artifact',
+          status: 'running',
+        });
+      }
+    }
+  }
+
+  if (type === 'agent.output_item.done') {
+    const itemId = typeof params?.itemId === 'string' ? params.itemId : undefined;
+    if (itemId) {
+      const existingIndex = nextEntry.timeline.findIndex((item) => item.kind === 'artifact' && item.id === itemId);
+      if (existingIndex >= 0) {
+        const existing = nextEntry.timeline[existingIndex];
+        if (existing.kind === 'artifact') {
+          nextEntry.timeline[existingIndex] = {
+            ...existing,
+            status: 'completed',
+          };
+        }
+      } else {
+        nextEntry.timeline.push({
+          id: itemId,
+          kind: 'artifact',
+          text: '',
+          contentType: 'artifact',
+          status: 'completed',
+        });
+      }
     }
   }
 
