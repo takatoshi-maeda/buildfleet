@@ -1,5 +1,17 @@
 import { ConversationalAgent, createFileTools, createFindFilesTool, createTreeTool, FileHistory, MarkdownPromptLoader } from "ai-kit";
-import type { AgentContext, ConversationHistory, LLMClient, LLMChatInput, LLMClientOptions, LLMProvider, LLMResult, LLMStreamEvent } from "ai-kit";
+import type {
+  AgentContext,
+  AgentTool,
+  ConversationHistory,
+  LLMClient,
+  LLMChatInput,
+  LLMClientOptions,
+  LLMProvider,
+  LLMResult,
+  LLMStreamEvent,
+  ProviderNativeTool,
+} from "ai-kit";
+import { OpenAINativeToolRuntime } from "ai-kit";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ZodType } from "zod";
@@ -10,6 +22,7 @@ import {
   type CodefleetFrontDeskLlmConfig,
   type CodefleetFrontDeskRuntimeConfig,
 } from "./front-desk.js";
+import { createOpenAINativeApplyPatchTool, createOpenAINativeShellTool } from "./tools/openai-native-tools.js";
 
 export interface RequirementsInterviewerRuntimeConfig extends CodefleetFrontDeskRuntimeConfig {}
 
@@ -27,7 +40,14 @@ export function createCodefleetRequirementsInterviewerAgent(
     historyBaseDir: runtimeConfig.historyBaseDir ?? DEFAULT_HISTORY_BASE_DIR,
   });
   const llmClient = resolvedConfig.clientFactory(toLlmClientOptions(resolvedConfig.llm));
-  const tools = createSharedFileTools(resolvedConfig.fileToolWorkingDir);
+  const nativeTools = createRequirementsInterviewerNativeTools(resolvedConfig);
+  const tools: AgentTool[] = [
+    ...createSharedFileTools(resolvedConfig.fileToolWorkingDir),
+    ...nativeTools,
+  ];
+  const nativeToolRuntime = nativeTools.length > 0
+    ? new OpenAINativeToolRuntime(nativeTools)
+    : undefined;
 
   return (context: AgentContext) => {
     const persistentContext = withPersistentThreadHistory(context, resolvedConfig.historyBaseDir);
@@ -36,6 +56,7 @@ export function createCodefleetRequirementsInterviewerAgent(
       client: llmClient,
       instructions: CODEFLEET_REQUIREMENTS_INTERVIEWER_SYSTEM_PROMPT,
       tools,
+      nativeToolRuntime,
       maxTurns: resolvedConfig.maxTurns,
     });
   };
@@ -55,12 +76,33 @@ function createSharedFileTools(workingDir: string) {
   const tree = createTreeTool({ workingDir });
   const listDirectory = fileTools.find((tool) => tool.name === "list_directory");
   const readFile = fileTools.find((tool) => tool.name === "read_file");
-  const writeFile = fileTools.find((tool) => tool.name === "write_file");
   const makeDirectory = fileTools.find((tool) => tool.name === "make_directory");
-  if (!listDirectory || !readFile || !writeFile || !makeDirectory) {
+  if (!listDirectory || !readFile || !makeDirectory) {
     throw new Error("requirements-interviewer file tools are unavailable");
   }
-  return [findFiles, tree, listDirectory, readFile, writeFile, makeDirectory];
+  return [findFiles, tree, listDirectory, readFile, makeDirectory];
+}
+
+function createRequirementsInterviewerNativeTools(
+  resolvedConfig: RequirementsInterviewerRuntimeConfig & {
+    llm: CodefleetFrontDeskLlmConfig;
+    fileToolWorkingDir: string;
+  },
+): ProviderNativeTool[] {
+  if (resolvedConfig.llm.provider !== "openai") {
+    return [];
+  }
+
+  return [
+    createOpenAINativeShellTool({
+      workingDir: resolvedConfig.fileToolWorkingDir,
+      timeoutMs: 15_000,
+      blockedCommands: ["rm", "git", "sudo"],
+    }),
+    createOpenAINativeApplyPatchTool({
+      allowedPaths: ["docs/spec"],
+    }),
+  ];
 }
 
 function resolveProjectRoot(): string {

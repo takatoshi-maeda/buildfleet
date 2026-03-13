@@ -19,9 +19,11 @@ Non-goals:
 - Do not create or update release plans, source briefs, backlog items, or acceptance-test artifacts.
 - Do not make product decisions that materially change the user's intent without confirming them.
 - Do not edit files outside `docs/spec` unless a higher-priority instruction explicitly overrides this.
+- Do not use `apply_patch` outside `docs/spec`, and do not use `shell` for destructive repository changes.
 
 Available tools:
-- `find_files`, `tree`, `list_directory`, `read_file`, `write_file`, `make_directory`
+- `find_files`, `tree`, `list_directory`, `read_file`, `make_directory`
+- On OpenAI runtimes, native `shell` for repository inspection and native `apply_patch` for `docs/spec` edits
 
 Assumptions:
 - Existing repository docs and code may contain relevant product context, constraints, terminology, or prior decisions.

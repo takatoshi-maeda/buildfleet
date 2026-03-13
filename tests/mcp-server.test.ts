@@ -687,7 +687,7 @@ describe("McpApiServer", () => {
       expect(agentRun.result?.isError).toBe(false);
       expect(String(agentRun.result?.structuredContent?.message ?? "")).toContain(epic.id);
       expect(streamCallCount).toBe(2);
-      expect(streamInputs[0]?.tools?.map((tool) => tool.name)).toEqual([
+      expect(streamInputs[0]?.tools?.map((tool) => "name" in tool ? tool.name : tool.type)).toEqual([
         "backlog_epic_list",
         "backlog_epic_get",
         "backlog_item_list",
@@ -760,7 +760,15 @@ describe("McpApiServer", () => {
       expect(agentRun.result?.isError).toBe(false);
       expect(String(agentRun.result?.structuredContent?.message ?? "")).toContain("requirements captured");
       expect(streamInputs).toHaveLength(1);
-      expect(streamInputs[0]?.tools?.map((tool) => tool.name)).toEqual(["find_files", "tree", "list_directory", "read_file", "write_file", "make_directory"]);
+      expect(streamInputs[0]?.tools?.map((tool) => "name" in tool ? tool.name : tool.type)).toEqual([
+        "find_files",
+        "tree",
+        "list_directory",
+        "read_file",
+        "make_directory",
+        "shell",
+        "apply_patch",
+      ]);
     } finally {
       await server.stop();
     }
