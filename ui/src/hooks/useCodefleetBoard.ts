@@ -15,7 +15,14 @@ export type UseCodefleetBoardResult = {
 };
 
 function isAbortLikeError(error: unknown): boolean {
-  if (error instanceof DOMException && error.name === 'AbortError') return true;
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    'name' in error &&
+    error.name === 'AbortError'
+  ) {
+    return true;
+  }
   const message = error instanceof Error ? error.message : String(error ?? '');
   return message.includes('signal is aborted');
 }
