@@ -99,7 +99,6 @@ describe("requirements-interviewer native tools", () => {
           llm: { provider: "openai", model: "gpt-5.3-codex", apiKey: "test-key" },
           clientFactory: () => mockClient,
           fileToolWorkingDir: tempDir,
-          historyBaseDir: path.join(tempDir, ".history"),
           maxTurns: 4,
         },
       );
@@ -202,7 +201,6 @@ describe("requirements-interviewer native tools", () => {
           llm: { provider: "openai", model: "gpt-5.3-codex", apiKey: "test-key" },
           clientFactory: () => mockClient,
           fileToolWorkingDir: tempDir,
-          historyBaseDir: path.join(tempDir, ".history"),
           maxTurns: 1,
         },
       );

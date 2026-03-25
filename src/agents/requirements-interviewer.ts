@@ -1,8 +1,7 @@
-import { ConversationalAgent, createFileTools, createFindFilesTool, createTreeTool, FileHistory, MarkdownPromptLoader } from "ai-kit";
+import { ConversationalAgent, createFileTools, createFindFilesTool, createTreeTool, MarkdownPromptLoader } from "ai-kit";
 import type {
   AgentContext,
   AgentTool,
-  ConversationHistory,
   LLMClient,
   LLMChatInput,
   LLMClientOptions,
@@ -14,7 +13,6 @@ import type {
 import { OpenAINativeToolRuntime } from "ai-kit";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { ZodType } from "zod";
 import type { BacklogService } from "../domain/backlog/backlog-service.js";
 import { DEFAULT_DOCUMENTS_ROOT_DIR } from "../domain/documents/document-service.js";
 import {
@@ -26,8 +24,6 @@ import { createOpenAINativeApplyPatchTool, createOpenAINativeShellTool } from ".
 
 export interface RequirementsInterviewerRuntimeConfig extends CodefleetFrontDeskRuntimeConfig {}
 
-const DEFAULT_HISTORY_BASE_DIR = ".codefleet/runtime/requirements-interviewer-history";
-
 export const CODEFLEET_REQUIREMENTS_INTERVIEWER_SYSTEM_PROMPT =
   createRequirementsInterviewerPromptLoader().format("instructions");
 
@@ -35,10 +31,7 @@ export function createCodefleetRequirementsInterviewerAgent(
   _backlogService: BacklogService,
   runtimeConfig: RequirementsInterviewerRuntimeConfig = {},
 ) {
-  const resolvedConfig = resolveCodefleetFrontDeskRuntimeConfig({
-    ...runtimeConfig,
-    historyBaseDir: runtimeConfig.historyBaseDir ?? DEFAULT_HISTORY_BASE_DIR,
-  });
+  const resolvedConfig = resolveCodefleetFrontDeskRuntimeConfig(runtimeConfig);
   const llmClient = resolvedConfig.clientFactory(toLlmClientOptions(resolvedConfig.llm));
   const nativeTools = createRequirementsInterviewerNativeTools(resolvedConfig);
   const tools: AgentTool[] = [
@@ -50,9 +43,10 @@ export function createCodefleetRequirementsInterviewerAgent(
     : undefined;
 
   return (context: AgentContext) => {
-    const persistentContext = withPersistentThreadHistory(context, resolvedConfig.historyBaseDir);
     return new ConversationalAgent({
-      context: persistentContext,
+      // ai-kit now owns session-level conversation carry-over, so the app layer
+      // should pass through the provided context instead of replaying history.
+      context,
       client: llmClient,
       instructions: CODEFLEET_REQUIREMENTS_INTERVIEWER_SYSTEM_PROMPT,
       tools,
@@ -108,63 +102,6 @@ function createRequirementsInterviewerNativeTools(
 function resolveProjectRoot(): string {
   const currentDir = path.dirname(fileURLToPath(import.meta.url));
   return path.resolve(currentDir, "..", "..");
-}
-
-function withPersistentThreadHistory(context: AgentContext, baseDir: string): AgentContext {
-  if (context.history instanceof FileHistory) {
-    return context;
-  }
-
-  const sessionId = sanitizeSessionIdForFilename(context.sessionId);
-  const persistentHistory = new FileHistory({
-    sessionId,
-    baseDir,
-  });
-  return new ContextWithOverriddenHistory(context, persistentHistory);
-}
-
-function sanitizeSessionIdForFilename(sessionId: string): string {
-  const normalized = sessionId.replace(/[^a-zA-Z0-9._-]/g, "_");
-  return normalized.length > 0 ? normalized : "default";
-}
-
-class ContextWithOverriddenHistory implements AgentContext {
-  constructor(
-    private readonly base: AgentContext,
-    readonly history: ConversationHistory,
-  ) {}
-
-  get sessionId() {
-    return this.base.sessionId;
-  }
-
-  get progress() {
-    return this.base.progress;
-  }
-
-  get toolCallResults() {
-    return this.base.toolCallResults;
-  }
-
-  get turns() {
-    return this.base.turns;
-  }
-
-  get selectedAgentName() {
-    return this.base.selectedAgentName;
-  }
-
-  set selectedAgentName(value: string | undefined) {
-    this.base.selectedAgentName = value;
-  }
-
-  get metadata() {
-    return this.base.metadata;
-  }
-
-  collectToolResults<T>(schema: ZodType<T>): T[] {
-    return this.base.collectToolResults(schema);
-  }
 }
 
 function toLlmClientOptions(config: CodefleetFrontDeskLlmConfig): LLMClientOptions {

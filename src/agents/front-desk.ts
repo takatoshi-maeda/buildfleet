@@ -1,13 +1,11 @@
-import { ConversationalAgent, createFileTools, FileHistory } from "ai-kit";
+import { ConversationalAgent, createFileTools } from "ai-kit";
 import type { LLMClient, LLMClientOptions, LLMProvider } from "ai-kit";
 import type { AgentContext } from "ai-kit";
 import type { LLMChatInput, LLMResult } from "ai-kit";
 import type { LLMStreamEvent } from "ai-kit";
-import type { ConversationHistory } from "ai-kit";
 import { MarkdownPromptLoader } from "ai-kit";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { ZodType } from "zod";
 import type { BacklogService } from "../domain/backlog/backlog-service.js";
 import { DEFAULT_DOCUMENTS_ROOT_DIR } from "../domain/documents/document-service.js";
 import { createBacklogAgentTools } from "./tools/backlog-agent-tools.js";
@@ -29,7 +27,6 @@ export interface CodefleetFrontDeskRuntimeConfig {
   releasePlansDir?: string;
   releasePlanEventPublisher?: ReleasePlanEventPublisher;
   fileToolWorkingDir?: string;
-  historyBaseDir?: string;
   clientFactory?: (options: LLMClientOptions) => LLMClient;
 }
 
@@ -38,7 +35,6 @@ interface ResolvedCodefleetFrontDeskRuntimeConfig {
   releasePlansDir: string;
   releasePlanEventPublisher?: ReleasePlanEventPublisher;
   fileToolWorkingDir: string;
-  historyBaseDir: string;
   llm: CodefleetFrontDeskLlmConfig;
   clientFactory: (options: LLMClientOptions) => LLMClient;
 }
@@ -47,7 +43,6 @@ const DEFAULT_LLM_PROVIDER: LLMProvider = "openai";
 const DEFAULT_LLM_MODEL = "gpt-5.4";
 const DEFAULT_MAX_TURNS = 6;
 const DEFAULT_RELEASE_PLANS_DIR = ".codefleet/data/release-plan";
-const DEFAULT_HISTORY_BASE_DIR = ".codefleet/runtime/front-desk-history";
 
 const DEFAULT_API_KEY_ENV_BY_PROVIDER: Record<LLMProvider, string> = {
   openai: "OPENAI_API_KEY",
@@ -76,9 +71,10 @@ export function createCodefleetFrontDeskAgent(
   ];
 
   return (context: AgentContext) => {
-    const persistentContext = withPersistentThreadHistory(context, resolvedConfig.historyBaseDir);
     return new ConversationalAgent({
-      context: persistentContext,
+      // ai-kit now owns session-level conversation carry-over, so the app layer
+      // should pass through the provided context instead of replaying history.
+      context,
       client: llmClient,
       instructions: CODEFLEET_FRONT_DESK_SYSTEM_PROMPT,
       tools,
@@ -109,7 +105,6 @@ export function resolveCodefleetFrontDeskRuntimeConfig(
     releasePlansDir: runtimeConfig.releasePlansDir ?? DEFAULT_RELEASE_PLANS_DIR,
     releasePlanEventPublisher: runtimeConfig.releasePlanEventPublisher,
     fileToolWorkingDir: runtimeConfig.fileToolWorkingDir ?? process.cwd(),
-    historyBaseDir: runtimeConfig.historyBaseDir ?? DEFAULT_HISTORY_BASE_DIR,
     llm: {
       provider,
       model,
@@ -150,65 +145,6 @@ function resolveProjectRoot(): string {
   // prompt loading stable for both ts source execution and built artifacts.
   const currentDir = path.dirname(fileURLToPath(import.meta.url));
   return path.resolve(currentDir, "..", "..");
-}
-
-function withPersistentThreadHistory(context: AgentContext, baseDir: string): AgentContext {
-  if (context.history instanceof FileHistory) {
-    return context;
-  }
-
-  const sessionId = sanitizeSessionIdForFilename(context.sessionId);
-  const persistentHistory = new FileHistory({
-    // sessionId can be user-provided (e.g., MCP agent.run params.sessionId),
-    // so normalize to a filesystem-safe filename segment.
-    sessionId,
-    baseDir,
-  });
-  return new FrontDeskContextWithOverriddenHistory(context, persistentHistory);
-}
-
-function sanitizeSessionIdForFilename(sessionId: string): string {
-  const normalized = sessionId.replace(/[^a-zA-Z0-9._-]/g, "_");
-  return normalized.length > 0 ? normalized : "default";
-}
-
-class FrontDeskContextWithOverriddenHistory implements AgentContext {
-  constructor(
-    private readonly base: AgentContext,
-    readonly history: ConversationHistory,
-  ) {}
-
-  get sessionId() {
-    return this.base.sessionId;
-  }
-
-  get progress() {
-    return this.base.progress;
-  }
-
-  get toolCallResults() {
-    return this.base.toolCallResults;
-  }
-
-  get turns() {
-    return this.base.turns;
-  }
-
-  get selectedAgentName() {
-    return this.base.selectedAgentName;
-  }
-
-  set selectedAgentName(value: string | undefined) {
-    this.base.selectedAgentName = value;
-  }
-
-  get metadata() {
-    return this.base.metadata;
-  }
-
-  collectToolResults<T>(schema: ZodType<T>): T[] {
-    return this.base.collectToolResults(schema);
-  }
 }
 
 function toLlmClientOptions(config: CodefleetFrontDeskLlmConfig): LLMClientOptions {
