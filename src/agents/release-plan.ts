@@ -1,10 +1,22 @@
 import { ConversationalAgent, createFileTools, MarkdownPromptLoader } from "ai-kit";
-import type { AgentContext, LLMClient, LLMChatInput, LLMClientOptions, LLMProvider, LLMResult, LLMStreamEvent } from "ai-kit";
+import type {
+  AgentContext,
+  AgentTool,
+  LLMClient,
+  LLMChatInput,
+  LLMClientOptions,
+  LLMProvider,
+  LLMResult,
+  LLMStreamEvent,
+  ProviderNativeTool,
+} from "ai-kit";
+import { OpenAINativeToolRuntime } from "ai-kit";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { BacklogService } from "../domain/backlog/backlog-service.js";
 import { DEFAULT_DOCUMENTS_ROOT_DIR } from "../domain/documents/document-service.js";
 import { createBacklogAgentTools } from "./tools/backlog-agent-tools.js";
+import { createOpenAINativeApplyPatchTool, createOpenAINativeShellTool } from "./tools/openai-native-tools.js";
 import { createReleasePlanAgentTools } from "./tools/release-plan-agent-tools.js";
 import {
   resolveCodefleetFrontDeskRuntimeConfig,
@@ -23,15 +35,25 @@ export function createCodefleetReleasePlanAgent(
 ) {
   const resolvedConfig = resolveCodefleetFrontDeskRuntimeConfig(runtimeConfig);
   const llmClient = resolvedConfig.clientFactory(toLlmClientOptions(resolvedConfig.llm));
-  const tools = [
+  const nativeTools = createReleasePlanNativeTools(resolvedConfig);
+  const tools: AgentTool[] = [
     ...createBacklogAgentTools(backlogService),
     ...createReleasePlanAgentTools({
       releasePlansDir: resolvedConfig.releasePlansDir,
+      releasePlanDraftsDir: resolvedConfig.releasePlanDraftsDir,
       projectRootDir: process.cwd(),
       eventPublisher: resolvedConfig.releasePlanEventPublisher,
     }),
-    ...createSharedFileTools(resolvedConfig.fileToolWorkingDir),
+    ...createSharedFileTools(
+      resolvedConfig.fileToolWorkingDir,
+      resolvedConfig.releasePlanDraftsDir,
+      resolvedConfig.releasePlansDir,
+    ),
+    ...nativeTools,
   ];
+  const nativeToolRuntime = nativeTools.length > 0
+    ? new OpenAINativeToolRuntime(nativeTools)
+    : undefined;
 
   return (context: AgentContext) => {
     return new ConversationalAgent({
@@ -41,6 +63,7 @@ export function createCodefleetReleasePlanAgent(
       client: llmClient,
       instructions: CODEFLEET_RELEASE_PLAN_SYSTEM_PROMPT,
       tools,
+      nativeToolRuntime,
       maxTurns: resolvedConfig.maxTurns,
     });
   };
@@ -51,19 +74,43 @@ function createReleasePlanPromptLoader(): MarkdownPromptLoader {
   return new MarkdownPromptLoader({ baseDir: promptsDir });
 }
 
-function createSharedFileTools(workingDir: string) {
+function createSharedFileTools(workingDir: string, releasePlanDraftsDir: string, releasePlansDir: string) {
   const fileTools = createFileTools({
     workingDir,
-    allowedPaths: [".", DEFAULT_DOCUMENTS_ROOT_DIR],
+    allowedPaths: [".", DEFAULT_DOCUMENTS_ROOT_DIR, releasePlanDraftsDir, releasePlansDir],
   });
   const listDirectory = fileTools.find((tool) => tool.name === "list_directory");
   const readFile = fileTools.find((tool) => tool.name === "read_file");
-  const writeFile = fileTools.find((tool) => tool.name === "write_file");
   const makeDirectory = fileTools.find((tool) => tool.name === "make_directory");
-  if (!listDirectory || !readFile || !writeFile || !makeDirectory) {
+  if (!listDirectory || !readFile || !makeDirectory) {
     throw new Error("release-plan file tools are unavailable");
   }
-  return [listDirectory, readFile, writeFile, makeDirectory];
+  return [listDirectory, readFile, makeDirectory];
+}
+
+function createReleasePlanNativeTools(
+  resolvedConfig: ReleasePlanRuntimeConfig & {
+    llm: CodefleetFrontDeskLlmConfig;
+    fileToolWorkingDir: string;
+    releasePlanDraftsDir: string;
+  },
+): ProviderNativeTool[] {
+  if (resolvedConfig.llm.provider !== "openai") {
+    return [];
+  }
+
+  return [
+    createOpenAINativeShellTool({
+      workingDir: resolvedConfig.fileToolWorkingDir,
+      timeoutMs: 15_000,
+      blockedCommands: ["rm", "git", "sudo"],
+    }),
+    createOpenAINativeApplyPatchTool({
+      // Drafts stay isolated from durable release-plan storage so commit can
+      // add canonical metadata and emit the domain event exactly once.
+      allowedPaths: [resolvedConfig.releasePlanDraftsDir],
+    }),
+  ];
 }
 
 function resolveProjectRoot(): string {

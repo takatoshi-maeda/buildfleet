@@ -36,7 +36,6 @@ describe("McpApiServer", () => {
       expect(agentList.result?.structuredContent?.agents).toEqual(
         expect.arrayContaining([
           expect.objectContaining({ agentId: "front-desk" }),
-          expect.objectContaining({ agentId: "requirements-interviewer" }),
           expect.objectContaining({ agentId: "release-plan" }),
         ]),
       );
@@ -692,7 +691,7 @@ describe("McpApiServer", () => {
         "backlog_epic_get",
         "backlog_item_list",
         "backlog_item_get",
-        "release_plan_create",
+        "release_plan_commit",
         "release_plan_list",
         "list_directory",
         "read_file",
@@ -704,13 +703,13 @@ describe("McpApiServer", () => {
     }
   });
 
-  it("serves requirements-interviewer with file tools only", async () => {
+  it("serves release-plan with draft tools and native patch support", async () => {
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "mcp-requirements-tools-"));
     const backlogService = new BacklogService(tempDir);
     const streamInputs: LLMChatInput[] = [];
     const mockClient: LLMClient = {
       provider: "openai",
-      model: "mock-requirements-interviewer",
+      model: "mock-release-plan",
       capabilities: {
         supportsReasoning: true,
         supportsToolCalls: true,
@@ -728,10 +727,10 @@ describe("McpApiServer", () => {
           type: "response.completed",
           result: {
             type: "message",
-            content: "requirements captured",
+            content: "release plan captured",
             toolCalls: [],
             usage: emptyUsage(),
-            responseId: "resp-requirements",
+            responseId: "resp-release-plan",
             finishReason: "stop",
           },
         };
@@ -754,15 +753,19 @@ describe("McpApiServer", () => {
     try {
       await server.start();
       const agentRun = await callTool(port, "agent.run", {
-        agentId: "requirements-interviewer",
-        message: "checkout flow requirement",
+        agentId: "release-plan",
+        message: "checkout flow release plan",
       });
       expect(agentRun.result?.isError).toBe(false);
-      expect(String(agentRun.result?.structuredContent?.message ?? "")).toContain("requirements captured");
+      expect(String(agentRun.result?.structuredContent?.message ?? "")).toContain("release plan captured");
       expect(streamInputs).toHaveLength(1);
       expect(streamInputs[0]?.tools?.map((tool) => "name" in tool ? tool.name : tool.type)).toEqual([
-        "find_files",
-        "tree",
+        "backlog_epic_list",
+        "backlog_epic_get",
+        "backlog_item_list",
+        "backlog_item_get",
+        "release_plan_commit",
+        "release_plan_list",
         "list_directory",
         "read_file",
         "make_directory",

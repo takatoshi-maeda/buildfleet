@@ -1,12 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
-import { decodeCodefleetWatchNotification } from '../mcp/decoders';
 import type { CodefleetClient, JsonRpcNotification } from '../mcp/client';
-import { useCodefleetBoard } from '../hooks/useCodefleetBoard';
 import { useCodefleetColors } from '../theme/useCodefleetColors';
-import { RequirementsDocumentPane } from './RequirementsDocumentPane';
 import { ThreadPane } from './ThreadPane';
 
 type Props = {
@@ -20,8 +17,13 @@ type StreamingArtifact = {
   path?: string;
   text: string;
   status: 'running' | 'completed';
-  contentType: 'artifact';
   updatedAt: number;
+};
+
+type CommitState = {
+  status: 'idle' | 'running' | 'completed' | 'failed';
+  updatedAt: number | null;
+  errorMessage?: string;
 };
 
 type PatchLineTone = 'meta' | 'add' | 'remove' | 'context' | 'plain';
@@ -58,58 +60,45 @@ function fileNameFromPath(path?: string): string | null {
   return segments.length > 0 ? segments[segments.length - 1] : path;
 }
 
-export function RequirementsInterviewWorkspace({ client }: Props) {
+function formatUpdatedAt(value: number | null): string | null {
+  if (!value) {
+    return null;
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.valueOf())) {
+    return null;
+  }
+  return date.toLocaleTimeString('ja-JP', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+}
+
+export function ReleasePlanWorkspace({ client }: Props) {
   const colors = useCodefleetColors();
   const { width } = useWindowDimensions();
   const isWide = width >= WIDE_LAYOUT_BREAKPOINT;
-  const board = useCodefleetBoard(client, true);
-  const refreshBoardRef = useRef(board.refreshBoard);
   const [streamingArtifacts, setStreamingArtifacts] = useState<StreamingArtifact[]>([]);
   const [collapsedArtifactIds, setCollapsedArtifactIds] = useState<Set<string>>(() => new Set());
+  const [commitState, setCommitState] = useState<CommitState>({
+    status: 'idle',
+    updatedAt: null,
+  });
 
-  refreshBoardRef.current = board.refreshBoard;
-
-  useEffect(() => {
-    const abort = new AbortController();
-    const notificationToken = `requirements-interview-${Date.now().toString(16)}-${Math.random().toString(16).slice(2)}`;
-    let refreshQueued = false;
-
-    const scheduleRefresh = () => {
-      if (refreshQueued) {
-        return;
-      }
-      refreshQueued = true;
-      setTimeout(() => {
-        refreshQueued = false;
-        void refreshBoardRef.current();
-      }, 240);
-    };
-
-    void client.watchFleet(
-      { heartbeatSec: 15, notificationToken },
-      {
-        signal: abort.signal,
-        onNotification: (message) => {
-          const event = decodeCodefleetWatchNotification(message);
-          if (!event || event.params.notificationToken !== notificationToken) {
-            return;
-          }
-          if (event.method === 'backlog.snapshot' || event.method === 'backlog.changed') {
-            scheduleRefresh();
-          }
-        },
-      },
-    ).catch(() => undefined);
-
-    return () => abort.abort();
-  }, [client]);
-
-  const totalItems = useMemo(
-    () => Object.values(board.itemsByEpicId).reduce((count, items) => count + items.length, 0),
-    [board.itemsByEpicId],
-  );
-  const hasArtifacts = board.epics.length > 0 || totalItems > 0;
   const hasStreamingArtifacts = streamingArtifacts.length > 0;
+  const commitStatusLabel = useMemo(() => {
+    switch (commitState.status) {
+      case 'running':
+        return 'Committing release plan';
+      case 'completed':
+        return 'Release plan committed';
+      case 'failed':
+        return 'Commit failed';
+      default:
+        return 'Draft in progress';
+    }
+  }, [commitState.status]);
 
   const handleThreadStreamEvent = useCallback((message: JsonRpcNotification) => {
     const params =
@@ -136,7 +125,6 @@ export function RequirementsInterviewWorkspace({ client }: Props) {
           path: path ?? (existingIndex >= 0 ? next[existingIndex].path : undefined),
           text: existingIndex >= 0 ? next[existingIndex].text : '',
           status: 'running',
-          contentType: 'artifact',
           updatedAt: Date.now(),
         };
         if (existingIndex >= 0) {
@@ -170,7 +158,6 @@ export function RequirementsInterviewWorkspace({ client }: Props) {
             id: itemId,
             text: delta,
             status: 'running',
-            contentType: 'artifact',
             updatedAt: Date.now(),
           });
         }
@@ -198,29 +185,94 @@ export function RequirementsInterviewWorkspace({ client }: Props) {
           )
           .sort((a, b) => b.updatedAt - a.updatedAt),
       );
+      return;
+    }
+
+    if (type === 'agent.tool_call') {
+      const summary = typeof params?.summary === 'string' ? params.summary : '';
+      if (summary === 'release_plan_commit') {
+        setCommitState({
+          status: 'running',
+          updatedAt: Date.now(),
+        });
+      }
+      return;
+    }
+
+    if (type === 'agent.tool_call_finish') {
+      const summary = typeof params?.summary === 'string' ? params.summary : '';
+      const status = params?.status === 'failed' ? 'failed' : 'completed';
+      const errorMessage = typeof params?.errorMessage === 'string' ? params.errorMessage : undefined;
+      if (summary === 'release_plan_commit') {
+        setCommitState({
+          status,
+          updatedAt: Date.now(),
+          errorMessage,
+        });
+      }
     }
   }, []);
 
-  const renderArtifactsPane = useCallback(() => {
-    if (board.isLoading && !hasArtifacts && !hasStreamingArtifacts) {
-      return null;
-    }
-    if (!hasArtifacts && !hasStreamingArtifacts) {
-      return null;
-    }
-
-    return (
+  return (
+    <View
+      style={[
+        styles.container,
+        isWide ? styles.containerWide : styles.containerStacked,
+        { backgroundColor: colors.background },
+      ]}
+    >
+      <View
+        style={[
+          styles.conversationPane,
+          isWide ? styles.conversationPaneWide : styles.conversationPaneStacked,
+          { borderRightColor: colors.surfaceBorder, borderBottomColor: colors.surfaceBorder },
+        ]}
+      >
+        <ThreadPane
+          client={client}
+          title=""
+          agentId="release-plan"
+          artifactDisplayMode="external"
+          onStreamEvent={handleThreadStreamEvent}
+        />
+      </View>
       <View
         style={[
           styles.artifactsPane,
-          isWide ? [styles.paneWide, styles.artifactsPaneWide] : styles.artifactsPaneStacked,
+          isWide ? styles.artifactsPaneWide : styles.artifactsPaneStacked,
           { backgroundColor: colors.surface, borderRightColor: colors.surfaceBorder, borderBottomColor: colors.surfaceBorder },
         ]}
       >
         <View style={[styles.artifactsHeader, { borderBottomColor: colors.surfaceBorder }]}>
-          <Text style={[styles.artifactsEyebrow, { color: colors.mutedText }]}>Artifacts</Text>
+          <Text style={[styles.artifactsEyebrow, { color: colors.mutedText }]}>Release Plan</Text>
+          <Text style={[styles.artifactsTitle, { color: colors.text }]}>{commitStatusLabel}</Text>
+          {commitState.updatedAt ? (
+            <Text style={[styles.commitMeta, { color: colors.mutedText }]}>
+              Updated {formatUpdatedAt(commitState.updatedAt)}
+            </Text>
+          ) : (
+            <Text style={[styles.commitMeta, { color: colors.mutedText }]}>
+              Draft artifacts stream here while the plan is being written.
+            </Text>
+          )}
+          {commitState.status === 'failed' && commitState.errorMessage ? (
+            <Text style={[styles.commitError, { color: '#991b1b' }]}>{commitState.errorMessage}</Text>
+          ) : null}
         </View>
         <ScrollView style={styles.artifactsScroll} contentContainerStyle={styles.artifactsBody}>
+          {!hasStreamingArtifacts ? (
+            <View
+              style={[
+                styles.emptyCard,
+                { borderColor: colors.surfaceBorder, backgroundColor: colors.background },
+              ]}
+            >
+              <Text style={[styles.emptyTitle, { color: colors.text }]}>No draft artifacts yet</Text>
+              <Text style={[styles.emptyText, { color: colors.mutedText }]}>
+                The `release-plan` agent will stream draft markdown here when it starts editing a draft file.
+              </Text>
+            </View>
+          ) : null}
           {streamingArtifacts.map((artifact) => (
             <View
               key={artifact.id}
@@ -324,58 +376,7 @@ export function RequirementsInterviewWorkspace({ client }: Props) {
               ) : null}
             </View>
           ))}
-          {board.epics.slice(0, 8).map((epic) => {
-            const itemCount = board.itemsByEpicId[epic.id]?.length ?? 0;
-            return (
-              <View key={epic.id} style={[styles.artifactCard, { borderColor: colors.surfaceBorder, backgroundColor: colors.background }]}>
-                <Text style={[styles.artifactStatus, { color: colors.mutedText }]}>
-                  {(epic.status ?? 'todo').toUpperCase()}
-                </Text>
-                <Text style={[styles.artifactTitle, { color: colors.text }]} numberOfLines={2}>
-                  {epic.title}
-                </Text>
-                <Text style={[styles.artifactMeta, { color: colors.mutedText }]}>
-                  {epic.id} · {itemCount} items
-                </Text>
-              </View>
-            );
-          })}
         </ScrollView>
-      </View>
-    );
-  }, [board.epics, board.isLoading, board.itemsByEpicId, collapsedArtifactIds, colors.background, colors.mutedText, colors.surface, colors.surfaceBorder, colors.text, hasArtifacts, hasStreamingArtifacts, isWide, streamingArtifacts, totalItems]);
-
-  return (
-    <View
-      style={[
-        styles.container,
-        isWide ? styles.containerWide : styles.containerStacked,
-        { backgroundColor: colors.background },
-      ]}
-    >
-      <View
-        style={[
-          styles.conversationPane,
-          isWide
-            ? [
-                hasArtifacts ? styles.conversationPaneWideWithArtifacts : styles.conversationPaneWide,
-                styles.conversationPaneWideBorder,
-              ]
-            : styles.conversationPaneStacked,
-          { borderRightColor: colors.surfaceBorder, borderBottomColor: colors.surfaceBorder },
-        ]}
-      >
-        <ThreadPane
-          client={client}
-          title=""
-          agentId="requirements-interviewer"
-          artifactDisplayMode="external"
-          onStreamEvent={handleThreadStreamEvent}
-        />
-      </View>
-      {renderArtifactsPane()}
-      <View style={[styles.documentPane, isWide ? styles.documentPaneWide : styles.documentPaneStacked]}>
-        <RequirementsDocumentPane client={client} />
       </View>
     </View>
   );
@@ -399,11 +400,6 @@ const styles = StyleSheet.create({
   },
   conversationPaneWide: {
     flex: 2,
-  },
-  conversationPaneWideWithArtifacts: {
-    flex: 2,
-  },
-  conversationPaneWideBorder: {
     borderRightWidth: 1,
   },
   conversationPaneStacked: {
@@ -417,43 +413,36 @@ const styles = StyleSheet.create({
   },
   artifactsPaneWide: {
     flex: 1,
-    borderRightWidth: 1,
   },
   artifactsPaneStacked: {
-    borderBottomWidth: 1,
-    maxHeight: 280,
-  },
-  paneWide: {
-    flex: 1,
-  },
-  documentPane: {
-    minWidth: 0,
-    minHeight: 0,
-  },
-  documentPaneWide: {
-    flex: 1,
-  },
-  documentPaneStacked: {
     flex: 1,
     minHeight: 320,
   },
   artifactsHeader: {
-    minHeight: 72,
+    minHeight: 112,
     paddingHorizontal: 18,
-    paddingVertical: 14,
+    paddingVertical: 16,
     borderBottomWidth: 1,
-    justifyContent: 'center',
+    gap: 4,
   },
   artifactsEyebrow: {
     fontSize: 11,
     fontWeight: '700',
     textTransform: 'uppercase',
     letterSpacing: 0.8,
-    marginBottom: 4,
   },
   artifactsTitle: {
     fontSize: 18,
     fontWeight: '700',
+  },
+  commitMeta: {
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  commitError: {
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: '600',
   },
   artifactsBody: {
     padding: 14,
@@ -461,6 +450,20 @@ const styles = StyleSheet.create({
   },
   artifactsScroll: {
     flex: 1,
+  },
+  emptyCard: {
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 14,
+    gap: 6,
+  },
+  emptyTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  emptyText: {
+    fontSize: 13,
+    lineHeight: 19,
   },
   artifactCard: {
     borderWidth: 1,
@@ -491,11 +494,6 @@ const styles = StyleSheet.create({
   streamingArtifactCard: {
     overflow: 'hidden',
   },
-  artifactStatus: {
-    fontSize: 11,
-    fontWeight: '800',
-    letterSpacing: 0.7,
-  },
   artifactTitle: {
     fontSize: 16,
     fontWeight: '700',
@@ -520,6 +518,6 @@ const styles = StyleSheet.create({
   },
   patchLine: {
     paddingHorizontal: 10,
-    paddingVertical: 3,
+    paddingVertical: 2,
   },
 });

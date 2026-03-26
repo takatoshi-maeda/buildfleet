@@ -25,6 +25,7 @@ export interface CodefleetFrontDeskRuntimeConfig {
   llm?: Partial<CodefleetFrontDeskLlmConfig>;
   maxTurns?: number;
   releasePlansDir?: string;
+  releasePlanDraftsDir?: string;
   releasePlanEventPublisher?: ReleasePlanEventPublisher;
   fileToolWorkingDir?: string;
   clientFactory?: (options: LLMClientOptions) => LLMClient;
@@ -33,6 +34,7 @@ export interface CodefleetFrontDeskRuntimeConfig {
 interface ResolvedCodefleetFrontDeskRuntimeConfig {
   maxTurns: number;
   releasePlansDir: string;
+  releasePlanDraftsDir: string;
   releasePlanEventPublisher?: ReleasePlanEventPublisher;
   fileToolWorkingDir: string;
   llm: CodefleetFrontDeskLlmConfig;
@@ -43,6 +45,7 @@ const DEFAULT_LLM_PROVIDER: LLMProvider = "openai";
 const DEFAULT_LLM_MODEL = "gpt-5.4";
 const DEFAULT_MAX_TURNS = 6;
 const DEFAULT_RELEASE_PLANS_DIR = ".codefleet/data/release-plan";
+const DEFAULT_RELEASE_PLAN_DRAFTS_DIR = ".codefleet/runtime/release-plan-drafts";
 
 const DEFAULT_API_KEY_ENV_BY_PROVIDER: Record<LLMProvider, string> = {
   openai: "OPENAI_API_KEY",
@@ -64,6 +67,7 @@ export function createCodefleetFrontDeskAgent(
     ...createBacklogAgentTools(backlogService),
     ...createReleasePlanAgentTools({
       releasePlansDir: resolvedConfig.releasePlansDir,
+      releasePlanDraftsDir: resolvedConfig.releasePlanDraftsDir,
       projectRootDir: process.cwd(),
       eventPublisher: resolvedConfig.releasePlanEventPublisher,
     }),
@@ -103,6 +107,7 @@ export function resolveCodefleetFrontDeskRuntimeConfig(
   return {
     maxTurns,
     releasePlansDir: runtimeConfig.releasePlansDir ?? DEFAULT_RELEASE_PLANS_DIR,
+    releasePlanDraftsDir: runtimeConfig.releasePlanDraftsDir ?? DEFAULT_RELEASE_PLAN_DRAFTS_DIR,
     releasePlanEventPublisher: runtimeConfig.releasePlanEventPublisher,
     fileToolWorkingDir: runtimeConfig.fileToolWorkingDir ?? process.cwd(),
     llm: {

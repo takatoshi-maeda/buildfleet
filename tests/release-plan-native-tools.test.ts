@@ -4,14 +4,14 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { createCodefleetRequirementsInterviewerAgent } from "../src/agents/requirements-interviewer.js";
+import { createCodefleetReleasePlanAgent } from "../src/agents/release-plan.js";
 import type { BacklogService } from "../src/domain/backlog/backlog-service.js";
 
-describe("requirements-interviewer native tools", () => {
-  it("enables OpenAI native tools and returns provider raw follow-up items", async () => {
-    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "requirements-native-"));
-    const specDir = path.join(tempDir, "docs/spec");
-    await fs.mkdir(specDir, { recursive: true });
+describe("release-plan native tools", () => {
+  it("enables OpenAI native tools and allows apply_patch only for release-plan drafts", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "release-plan-native-"));
+    const draftDir = path.join(tempDir, ".codefleet/runtime/release-plan-drafts");
+    await fs.mkdir(draftDir, { recursive: true });
     const originalCwd = process.cwd();
     process.chdir(tempDir);
 
@@ -20,7 +20,7 @@ describe("requirements-interviewer native tools", () => {
       let streamCallCount = 0;
       const mockClient: LLMClient = {
         provider: "openai",
-        model: "mock-requirements-interviewer",
+        model: "mock-release-plan",
         capabilities: {
           supportsReasoning: true,
           supportsToolCalls: true,
@@ -64,7 +64,7 @@ describe("requirements-interviewer native tools", () => {
                   id: "patch-1",
                   name: "apply_patch",
                   arguments: {
-                    patch: "*** Begin Patch\n*** Add File: docs/spec/native-tools.md\n+# Native Tools\n*** End Patch",
+                    patch: "*** Begin Patch\n*** Add File: .codefleet/runtime/release-plan-drafts/draft.md\n+# Native Tools\n*** End Patch",
                   },
                   executionKind: "provider_native",
                   provider: "openai",
@@ -83,7 +83,7 @@ describe("requirements-interviewer native tools", () => {
             type: "response.completed",
             result: {
               type: "message",
-              content: "spec drafted",
+              content: "release plan drafted",
               toolCalls: [],
               usage: emptyUsage(),
               responseId: "resp-3",
@@ -93,43 +93,33 @@ describe("requirements-interviewer native tools", () => {
         },
       };
 
-      const createAgent = createCodefleetRequirementsInterviewerAgent(
+      const createAgent = createCodefleetReleasePlanAgent(
         {} as BacklogService,
         {
           llm: { provider: "openai", model: "gpt-5.3-codex", apiKey: "test-key" },
           clientFactory: () => mockClient,
           fileToolWorkingDir: tempDir,
+          releasePlanDraftsDir: ".codefleet/runtime/release-plan-drafts",
           maxTurns: 4,
         },
       );
-      const agent = createAgent(new AgentContextImpl({ history: new InMemoryHistory(), sessionId: "requirements-native" }));
-      const result = await agent.invoke("document native tools");
+      const agent = createAgent(new AgentContextImpl({ history: new InMemoryHistory(), sessionId: "release-plan-native" }));
+      const result = await agent.invoke("draft native tools");
 
-      expect(result.content).toBe("spec drafted");
+      expect(result.content).toBe("release plan drafted");
       expect(capturedInputs[0]?.tools?.map((tool) => "name" in tool ? tool.name : tool.type)).toEqual([
-        "find_files",
-        "tree",
+        "backlog_epic_list",
+        "backlog_epic_get",
+        "backlog_item_list",
+        "backlog_item_get",
+        "release_plan_commit",
+        "release_plan_list",
         "list_directory",
         "read_file",
         "make_directory",
         "shell",
         "apply_patch",
       ]);
-      expect(capturedInputs[1]?.messages).toContainEqual(
-        expect.objectContaining({
-          role: "tool",
-          toolCallId: "shell-1",
-          extra: expect.objectContaining({
-            providerRaw: expect.objectContaining({
-              provider: "openai",
-              inputItems: expect.arrayContaining([
-                expect.objectContaining({ type: "shell_call" }),
-                expect.objectContaining({ type: "shell_call_output", call_id: "shell-1" }),
-              ]),
-            }),
-          }),
-        }),
-      );
       expect(capturedInputs[2]?.messages).toContainEqual(
         expect.objectContaining({
           role: "tool",
@@ -137,27 +127,27 @@ describe("requirements-interviewer native tools", () => {
           extra: expect.objectContaining({
             tool: expect.objectContaining({
               result: expect.objectContaining({
-                content: "Created docs/spec/native-tools.md",
+                content: "Created .codefleet/runtime/release-plan-drafts/draft.md",
               }),
             }),
           }),
         }),
       );
-      await expect(fs.readFile(path.join(specDir, "native-tools.md"), "utf8")).resolves.toContain("Native Tools");
+      await expect(fs.readFile(path.join(draftDir, "draft.md"), "utf8")).resolves.toContain("Native Tools");
     } finally {
       process.chdir(originalCwd);
     }
   });
 
-  it("rejects apply_patch writes outside docs/spec", async () => {
-    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "requirements-native-guard-"));
+  it("rejects apply_patch writes outside release-plan draft storage", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "release-plan-native-guard-"));
     const originalCwd = process.cwd();
     process.chdir(tempDir);
 
     try {
       const mockClient: LLMClient = {
         provider: "openai",
-        model: "mock-requirements-interviewer",
+        model: "mock-release-plan",
         capabilities: {
           supportsReasoning: true,
           supportsToolCalls: true,
@@ -195,18 +185,19 @@ describe("requirements-interviewer native tools", () => {
         },
       };
 
-      const createAgent = createCodefleetRequirementsInterviewerAgent(
+      const createAgent = createCodefleetReleasePlanAgent(
         {} as BacklogService,
         {
           llm: { provider: "openai", model: "gpt-5.3-codex", apiKey: "test-key" },
           clientFactory: () => mockClient,
           fileToolWorkingDir: tempDir,
+          releasePlanDraftsDir: ".codefleet/runtime/release-plan-drafts",
           maxTurns: 1,
         },
       );
-      const agent = createAgent(new AgentContextImpl({ history: new InMemoryHistory(), sessionId: "requirements-native-guard" }));
+      const agent = createAgent(new AgentContextImpl({ history: new InMemoryHistory(), sessionId: "release-plan-native-guard" }));
 
-      await expect(agent.invoke("write outside spec")).rejects.toThrow(/maximum turns/i);
+      await expect(agent.invoke("write outside drafts")).rejects.toThrow(/maximum turns/i);
       expect(await fs.stat(path.join(tempDir, "src")).catch(() => null)).toBeNull();
     } finally {
       process.chdir(originalCwd);

@@ -60,7 +60,7 @@ export function DocumentMarkdownLivePreview({
         placeholder: '',
       }),
       Extension.create({
-        name: 'requirementsInterviewReadonly',
+        name: 'documentReadonly',
         addKeyboardShortcuts() {
           return {};
         },
@@ -83,7 +83,7 @@ export function DocumentMarkdownLivePreview({
     editable: false,
     editorProps: {
       attributes: {
-        class: 'document-markdown-editor__content tiptap requirements-interview-markdown',
+        class: 'document-markdown-editor__content tiptap document-markdown-readonly',
         'data-editor-mode': 'live',
       },
     },
@@ -306,4 +306,3 @@ const markdownEditorCss = `
   font-weight: 700;
 }
 `;
-

@@ -5,6 +5,7 @@ import type { ToolDefinition } from "ai-kit";
 import { createUlid } from "../../shared/ulid.js";
 
 const DEFAULT_RELEASE_PLANS_DIR = ".codefleet/data/release-plan";
+const DEFAULT_RELEASE_PLAN_DRAFTS_DIR = ".codefleet/runtime/release-plan-drafts";
 
 export interface ReleasePlanEventPublishResult {
   enqueuedAgentIds: string[];
@@ -16,16 +17,13 @@ export interface ReleasePlanEventPublisher {
 
 export interface CreateReleasePlanAgentToolsOptions {
   releasePlansDir?: string;
+  releasePlanDraftsDir?: string;
   projectRootDir?: string;
   eventPublisher?: ReleasePlanEventPublisher;
 }
 
-const ReleasePlanCreateInputSchema = z.object({
-  title: z.string().trim().min(1).max(500),
-  summary: z.string().trim().min(1).max(2_000),
-  details: z.string().trim().min(1),
-  sourceRefs: z.array(z.string().trim().min(1).max(500)).max(100).optional(),
-  reporter: z.string().trim().min(1).max(120).optional(),
+const ReleasePlanCommitInputSchema = z.object({
+  draftPath: z.string().trim().min(1),
 });
 
 const ReleasePlanListInputSchema = z.object({
@@ -34,13 +32,10 @@ const ReleasePlanListInputSchema = z.object({
 
 interface ReleasePlanRecord {
   id: string;
-  title: string;
-  summary: string;
-  details: string;
-  sourceRefs: string[];
-  reporter: string | null;
   createdAt: string;
-  createdBy: "codefleet.front-desk";
+  version: string;
+  content: string;
+  title: string | null;
 }
 
 type ReleasePlanAgentToolsInput = string | CreateReleasePlanAgentToolsOptions | undefined;
@@ -48,33 +43,51 @@ type ReleasePlanAgentToolsInput = string | CreateReleasePlanAgentToolsOptions | 
 export function createReleasePlanAgentTools(input: ReleasePlanAgentToolsInput = DEFAULT_RELEASE_PLANS_DIR): ToolDefinition[] {
   const options: CreateReleasePlanAgentToolsOptions = typeof input === "string" ? { releasePlansDir: input } : (input ?? {});
   const releasePlansDir = options.releasePlansDir ?? DEFAULT_RELEASE_PLANS_DIR;
+  const releasePlanDraftsDir = options.releasePlanDraftsDir ?? DEFAULT_RELEASE_PLAN_DRAFTS_DIR;
   const projectRootDir = options.projectRootDir ?? process.cwd();
   const eventPublisher = options.eventPublisher;
 
   return [
     {
-      name: "release_plan_create",
-      description: "Create a release plan for downstream curation and planning",
-      parameters: ReleasePlanCreateInputSchema,
+      name: "release_plan_commit",
+      description: "Commit a drafted release plan markdown file into durable storage",
+      parameters: ReleasePlanCommitInputSchema,
       execute: async (params) => {
-        const input = ReleasePlanCreateInputSchema.parse(params);
-        const now = new Date().toISOString();
+        const input = ReleasePlanCommitInputSchema.parse(params);
+        const absoluteDraftPath = resolveProjectFilePath(input.draftPath, projectRootDir);
+        assertPathInsideDirectory(absoluteDraftPath, resolveProjectFilePath(releasePlanDraftsDir, projectRootDir), "release plan draft");
+        const rawDraft = await fs.readFile(absoluteDraftPath, "utf8");
+        const draftContent = rawDraft.trim();
+        if (draftContent.length === 0) {
+          throw new Error("release plan draft must not be empty");
+        }
+
+        const now = new Date();
+        const createdAt = now.toISOString();
+        const version = formatReleasePlanVersion(now);
         const record: ReleasePlanRecord = {
           id: createUlid(),
-          title: input.title,
-          summary: input.summary,
-          details: input.details,
-          sourceRefs: uniqueNonEmpty(input.sourceRefs ?? []),
-          reporter: input.reporter ?? null,
-          createdAt: now,
-          createdBy: "codefleet.front-desk",
+          createdAt,
+          version,
+          content: draftContent,
+          title: extractTitleFromMarkdown(draftContent),
         };
 
         await fs.mkdir(releasePlansDir, { recursive: true });
-        const planPath = path.join(releasePlansDir, `${record.id}.md`);
+        const planPath = path.join(releasePlansDir, `${record.version}.md`);
         await fs.writeFile(planPath, serializeReleasePlan(record), "utf8");
         const event = await publishReleasePlanCreated(eventPublisher, planPath, projectRootDir);
-        return { releasePlan: record, path: planPath, event };
+        return {
+          releasePlan: {
+            id: record.id,
+            createdAt: record.createdAt,
+            version: record.version,
+            title: record.title,
+          },
+          draftPath: toProjectRelativePath(absoluteDraftPath, projectRootDir),
+          path: planPath,
+          event,
+        };
       },
     },
     {
@@ -129,16 +142,7 @@ async function publishReleasePlanCreated(
 }
 
 function toProjectRelativeMarkdownPath(filePath: string, projectRootDir: string): string {
-  const relative = path.relative(projectRootDir, filePath).split(path.sep).join("/");
-  if (relative.length === 0) {
-    throw new Error("release plan path must be non-empty");
-  }
-  if (relative.includes("..")) {
-    throw new Error("release plan path must be inside project root");
-  }
-  if (relative.startsWith("/") || /^[a-zA-Z]:[\\/]/u.test(relative)) {
-    throw new Error("release plan path must be project-root relative");
-  }
+  const relative = toProjectRelativePath(filePath, projectRootDir);
   if (!relative.endsWith(".md")) {
     throw new Error("release plan path must end with .md");
   }
@@ -183,7 +187,6 @@ function parseReleasePlan(raw: string): ReleasePlanRecord {
   }
 
   const frontMatterLines = lines.slice(1, frontMatterEnd);
-  const body = lines.slice(frontMatterEnd + 1).join("\n").trim();
   const entries = new Map<string, string>();
   for (const line of frontMatterLines) {
     const separatorIndex = line.indexOf(":");
@@ -193,55 +196,84 @@ function parseReleasePlan(raw: string): ReleasePlanRecord {
     entries.set(line.slice(0, separatorIndex).trim(), line.slice(separatorIndex + 1).trim());
   }
 
-  return ReleasePlanCreateInputSchema.extend({
+  const content = lines.slice(frontMatterEnd + 1).join("\n").trim();
+
+  return z.object({
     id: z.string().min(1),
-    sourceRefs: z.array(z.string().trim().min(1).max(500)),
-    reporter: z.string().trim().min(1).max(120).nullable(),
     createdAt: z.string().datetime(),
-    createdBy: z.literal("codefleet.front-desk"),
+    version: z.string().regex(/^\d{8}\.\d{6}$/u),
+    content: z.string().min(1),
+    title: z.string().nullable(),
   }).parse({
     id: entries.get("id"),
-    title: entries.get("title"),
-    summary: entries.get("summary"),
-    details: body,
-    sourceRefs: (entries.get("sourceRefs") ?? "")
-      .split(",")
-      .map((entry) => entry.trim())
-      .filter((entry) => entry.length > 0),
-    reporter: toNullable(entries.get("reporter")),
     createdAt: entries.get("createdAt"),
-    createdBy: entries.get("createdBy"),
+    version: entries.get("version"),
+    content,
+    title: extractTitleFromMarkdown(content),
   });
 }
 
 function serializeReleasePlan(plan: ReleasePlanRecord): string {
-  const reporter = plan.reporter ?? "null";
   return [
     "---",
     `id: ${plan.id}`,
-    `title: ${plan.title}`,
-    `summary: ${plan.summary}`,
-    `sourceRefs: ${plan.sourceRefs.join(", ")}`,
-    `reporter: ${reporter}`,
     `createdAt: ${plan.createdAt}`,
-    `createdBy: ${plan.createdBy}`,
+    `version: ${plan.version}`,
     "---",
-    plan.details,
+    plan.content,
     "",
   ].join("\n");
-}
-
-function uniqueNonEmpty(values: string[]): string[] {
-  return Array.from(new Set(values.map((value) => value.trim()).filter((value) => value.length > 0)));
 }
 
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {
   return typeof error === "object" && error !== null && "code" in error;
 }
 
-function toNullable(value: string | undefined): string | null {
-  if (!value || value === "null") {
-    return null;
+function resolveProjectFilePath(filePath: string, projectRootDir: string): string {
+  return path.resolve(projectRootDir, filePath);
+}
+
+function assertPathInsideDirectory(filePath: string, directoryPath: string, label: string): void {
+  const relative = path.relative(directoryPath, filePath);
+  if (
+    relative.length === 0 ||
+    (!relative.startsWith("..") && !path.isAbsolute(relative))
+  ) {
+    return;
   }
-  return value;
+  throw new Error(`${label} path must be inside ${directoryPath}`);
+}
+
+function toProjectRelativePath(filePath: string, projectRootDir: string): string {
+  const relative = path.relative(projectRootDir, filePath).split(path.sep).join("/");
+  if (relative.length === 0) {
+    throw new Error("path must be non-empty");
+  }
+  if (relative.includes("..")) {
+    throw new Error("path must be inside project root");
+  }
+  if (relative.startsWith("/") || /^[a-zA-Z]:[\\/]/u.test(relative)) {
+    throw new Error("path must be project-root relative");
+  }
+  return relative;
+}
+
+function formatReleasePlanVersion(value: Date): string {
+  const year = value.getUTCFullYear();
+  const month = String(value.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(value.getUTCDate()).padStart(2, "0");
+  const hours = String(value.getUTCHours()).padStart(2, "0");
+  const minutes = String(value.getUTCMinutes()).padStart(2, "0");
+  const seconds = String(value.getUTCSeconds()).padStart(2, "0");
+  return `${year}${month}${day}.${hours}${minutes}${seconds}`;
+}
+
+function extractTitleFromMarkdown(content: string): string | null {
+  for (const line of content.split(/\r?\n/)) {
+    const match = /^#\s+(.+)$/u.exec(line.trim());
+    if (match) {
+      return match[1]?.trim() || null;
+    }
+  }
+  return null;
 }
