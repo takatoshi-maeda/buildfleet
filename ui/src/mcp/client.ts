@@ -23,6 +23,30 @@ export type JsonRpcNotification = {
   params?: unknown;
 };
 
+export type ImageContentPart = {
+  type: 'image';
+  source: { type: 'url'; url: string } | { type: 'base64'; mediaType: string; data: string };
+};
+
+export type FileContentPart = {
+  type: 'file';
+  file: {
+    name: string;
+    mimeType: string;
+    sizeBytes: number;
+    source:
+      | { type: 'asset-ref'; assetRef: string }
+      | { type: 'url'; url: string }
+      | { type: 'base64'; mediaType: string; data: string };
+  };
+};
+
+export type AgentContentPart =
+  | { type: 'text'; text: string }
+  | ImageContentPart
+  | FileContentPart
+  | { type: 'audio'; data: string; format: string };
+
 type JsonRpcResponse = {
   jsonrpc: '2.0';
   id: JsonRpcId;
@@ -193,7 +217,8 @@ export type CodefleetClient = {
   listConversations(limit?: number, agentId?: string): Promise<ConversationsListResult>;
   getConversation(sessionId: string, agentId?: string): Promise<ConversationGetResult>;
   runAgent(args: {
-    message: string;
+    message?: string;
+    input?: AgentContentPart[] | string;
     sessionId?: string | null;
     agentId?: string;
     signal?: AbortSignal;
@@ -608,8 +633,12 @@ export function createCodefleetMcpClient(
       const payload: Record<string, unknown> = {
         stream: true,
         notificationToken,
-        message: args.message,
       };
+      if (args.input !== undefined) {
+        payload.input = args.input;
+      } else if (args.message !== undefined) {
+        payload.message = args.message;
+      }
       if (args.sessionId) {
         payload.sessionId = args.sessionId;
       }

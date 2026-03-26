@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   FlatList,
   Image,
+  type ImageSourcePropType,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -16,6 +17,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 
 import type {
+  AgentContentPart,
   CodefleetClient,
   ConversationGetResult,
   ConversationSummary,
@@ -28,10 +30,26 @@ type Props = {
   title?: string;
   agentId?: string;
   artifactDisplayMode?: 'timeline' | 'external';
+  allowAttachments?: boolean;
   onStreamEvent?: (event: JsonRpcNotification) => void;
 };
 
-type ContentPart = { type: 'text'; text: string } | { type: 'image'; url: string };
+type MessageContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'image'; url: string }
+  | { type: 'file'; name: string; mimeType: string; sizeBytes: number; url?: string };
+
+type ComposerAttachment = {
+  id: string;
+  name: string;
+  mimeType: string;
+  sizeBytes: number;
+  previewUri?: string;
+  imageSource?: ImageSourcePropType;
+  contentPart: AgentContentPart;
+  status: 'queued' | 'preparing' | 'attached' | 'failed';
+  errorMessage?: string;
+};
 
 type TimelineItem =
   | {
@@ -79,7 +97,7 @@ type ThreadMessage = {
   author: string;
   timestamp: string;
   content: string;
-  contentParts?: ContentPart[];
+  contentParts?: MessageContentPart[];
   status?: 'running' | 'completed' | 'failed';
   statusLine?: string;
   entry?: AgentEntry;
@@ -87,7 +105,7 @@ type ThreadMessage = {
 
 type ExtendedConversationTurn = ConversationGetResult['turns'][number] & {
   timeline?: TimelineItem[] | null;
-  userContent?: string | Array<{ type: string; text?: string; source?: { type: string; url?: string } }>;
+  userContent?: string | Array<Record<string, unknown>>;
   agentName?: string | null;
 };
 
@@ -108,6 +126,18 @@ type StreamDraft = {
 
 const POLL_INTERVAL_MS = 2000;
 const INITIAL_VISIBLE_TIMELINE = 3;
+const MAX_ATTACHMENTS_PER_MESSAGE = 5;
+const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
+const MAX_TOTAL_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+const SUPPORTED_ATTACHMENT_MIME_TYPES = new Set([
+  'text/plain',
+  'text/markdown',
+  'application/pdf',
+  'image/png',
+  'image/jpeg',
+  'image/webp',
+]);
+const SUPPORTED_ATTACHMENT_EXTENSIONS = '.txt,.md,.markdown,.pdf,.png,.jpg,.jpeg,.webp';
 
 function messageId(prefix: string): string {
   return `${prefix}-${Date.now().toString(16)}-${Math.random().toString(16).slice(2)}`;
@@ -135,18 +165,92 @@ function formatDuration(seconds: number): string {
   return `${s}s`;
 }
 
-function parseUserContentParts(value: ExtendedConversationTurn['userContent']): ContentPart[] | undefined {
+function parseUserContentParts(value: ExtendedConversationTurn['userContent']): MessageContentPart[] | undefined {
   if (!Array.isArray(value)) return undefined;
-  const parts = value.flatMap((part): ContentPart[] => {
-    if (part?.type === 'text' && typeof part.text === 'string') {
-      return [{ type: 'text', text: part.text }];
+  const parts = value.flatMap((part): MessageContentPart[] => {
+    const record = part as Record<string, unknown> | null;
+    if (record?.type === 'text' && typeof record.text === 'string') {
+      return [{ type: 'text', text: record.text }];
     }
-    if (part?.type === 'image' && part.source?.type === 'url' && typeof part.source.url === 'string') {
-      return [{ type: 'image', url: part.source.url }];
+    const source =
+      record?.source && typeof record.source === 'object'
+        ? (record.source as Record<string, unknown>)
+        : null;
+    if (record?.type === 'image' && source?.type === 'url' && typeof source.url === 'string') {
+      return [{ type: 'image', url: source.url }];
+    }
+    const file =
+      record?.file && typeof record.file === 'object'
+        ? (record.file as Record<string, unknown>)
+        : null;
+    if (
+      record?.type === 'file' &&
+      typeof file?.name === 'string' &&
+      typeof file?.mimeType === 'string' &&
+      typeof file?.sizeBytes === 'number'
+    ) {
+      const fileSource =
+        file.source && typeof file.source === 'object'
+          ? (file.source as { type?: string; url?: string })
+          : null;
+      return [
+        {
+          type: 'file',
+          name: file.name,
+          mimeType: file.mimeType,
+          sizeBytes: file.sizeBytes,
+          url: fileSource?.type === 'url' ? fileSource.url : undefined,
+        },
+      ];
     }
     return [];
   });
   return parts.length > 0 ? parts : undefined;
+}
+
+function formatBytes(sizeBytes: number): string {
+  if (sizeBytes < 1024) return `${sizeBytes} B`;
+  if (sizeBytes < 1024 * 1024) return `${(sizeBytes / 1024).toFixed(1)} KB`;
+  return `${(sizeBytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function isImageMimeType(mimeType: string): boolean {
+  return /^image\/(png|jpeg|webp)$/i.test(mimeType);
+}
+
+function inferMimeType(file: File): string {
+  const mimeType = file.type?.trim().toLowerCase();
+  if (mimeType) {
+    if (mimeType === 'text/x-markdown') return 'text/markdown';
+    return mimeType;
+  }
+  const name = file.name.toLowerCase();
+  if (name.endsWith('.md') || name.endsWith('.markdown')) return 'text/markdown';
+  if (name.endsWith('.txt')) return 'text/plain';
+  if (name.endsWith('.pdf')) return 'application/pdf';
+  if (name.endsWith('.png')) return 'image/png';
+  if (name.endsWith('.jpg') || name.endsWith('.jpeg')) return 'image/jpeg';
+  if (name.endsWith('.webp')) return 'image/webp';
+  return 'application/octet-stream';
+}
+
+function generateAttachmentId(): string {
+  return `attachment-${Date.now().toString(16)}-${Math.random().toString(16).slice(2)}`;
+}
+
+async function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error ?? new Error('Failed to read file.'));
+    reader.onload = () => {
+      if (typeof reader.result !== 'string') {
+        reject(new Error('Failed to read file.'));
+        return;
+      }
+      resolve(reader.result);
+    };
+    reader.readAsDataURL(file);
+  });
 }
 
 function getAgentMessageContent(entry: AgentEntry): string {
@@ -584,8 +688,15 @@ function ThreadMessageView({
             ) : (
               <>
                 {isUser && Array.isArray(message.contentParts) && message.contentParts.length > 0 ? (
-                  <View style={styles.imageGroup}>
+                  <View style={styles.userPartsGroup}>
                     {message.contentParts.map((part, index) => {
+                      if (part.type === 'text') {
+                        return (
+                          <Pressable key={`${message.id}-part-${index}`} onLongPress={handleCopy}>
+                            <Text style={[styles.content, { color: colors.text }]}>{part.text}</Text>
+                          </Pressable>
+                        );
+                      }
                       if (part.type === 'image') {
                         return (
                           <Pressable
@@ -602,9 +713,18 @@ function ThreadMessageView({
                         );
                       }
                       return (
-                        <Pressable key={`${message.id}-part-${index}`} onLongPress={handleCopy}>
-                          <Text style={[styles.content, { color: colors.text }]}>{part.text}</Text>
-                        </Pressable>
+                        <View
+                          key={`${message.id}-part-${index}`}
+                          style={[styles.fileChip, { borderColor: colors.surfaceBorder, backgroundColor: colors.surface }]}
+                        >
+                          <Ionicons name="document-outline" size={16} color={colors.mutedText} />
+                          <Text style={[styles.fileChipName, { color: colors.text }]} numberOfLines={1}>
+                            {part.name}
+                          </Text>
+                          <Text style={[styles.fileChipMeta, { color: colors.mutedText }]}>
+                            {formatBytes(part.sizeBytes)}
+                          </Text>
+                        </View>
                       );
                     })}
                   </View>
@@ -682,20 +802,30 @@ function ThreadDetail({
 
 function Composer({
   draft,
+  attachments,
   onChangeDraft,
+  onPickAttachments,
+  onRemoveAttachment,
   onSubmit,
   onAbort,
   isSubmitting,
+  allowAttachments,
+  hasFailedAttachments,
   colors,
 }: {
   draft: string;
+  attachments: ComposerAttachment[];
   onChangeDraft: (value: string) => void;
+  onPickAttachments: () => void;
+  onRemoveAttachment: (id: string) => void;
   onSubmit: () => void;
   onAbort: () => void;
   isSubmitting: boolean;
+  allowAttachments: boolean;
+  hasFailedAttachments: boolean;
   colors: ReturnType<typeof useCodefleetColors>;
 }) {
-  const canSend = draft.trim().length > 0 && !isSubmitting;
+  const canSend = (draft.trim().length > 0 || attachments.length > 0) && !isSubmitting && !hasFailedAttachments;
 
   const handleKeyPress = (event: any) => {
     if (Platform.OS !== 'web') return;
@@ -754,10 +884,57 @@ function Composer({
             </Pressable>
           )}
         </View>
+        {attachments.length > 0 ? (
+          <View style={styles.attachmentList}>
+            {attachments.map((attachment) => (
+              <View
+                key={attachment.id}
+                style={[
+                  styles.attachmentChip,
+                  {
+                    borderColor:
+                      attachment.status === 'failed' ? '#dc2626' : colors.surfaceBorder,
+                    backgroundColor: colors.surface,
+                  },
+                ]}
+              >
+                {attachment.previewUri && isImageMimeType(attachment.mimeType) ? (
+                  <Image source={{ uri: attachment.previewUri }} style={styles.attachmentPreview} resizeMode="cover" />
+                ) : (
+                  <Ionicons name="document-outline" size={16} color={colors.mutedText} />
+                )}
+                <View style={styles.attachmentTextGroup}>
+                  <Text style={[styles.attachmentName, { color: colors.text }]} numberOfLines={1}>
+                    {attachment.name}
+                  </Text>
+                  <Text style={[styles.attachmentMeta, { color: attachment.status === 'failed' ? '#dc2626' : colors.mutedText }]}>
+                    {attachment.status === 'failed'
+                      ? attachment.errorMessage || 'Failed'
+                      : `${attachment.status} • ${formatBytes(attachment.sizeBytes)}`}
+                  </Text>
+                </View>
+                {!isSubmitting ? (
+                  <Pressable onPress={() => onRemoveAttachment(attachment.id)} hitSlop={6}>
+                    <Ionicons name="close" size={16} color={colors.mutedText} />
+                  </Pressable>
+                ) : null}
+              </View>
+            ))}
+          </View>
+        ) : null}
         <View style={styles.bottomRow}>
-          <Pressable style={styles.button} disabled>
-            <Ionicons name="attach" size={22} color={`${colors.mutedText}55`} />
+          <Pressable style={styles.button} disabled={!allowAttachments || isSubmitting} onPress={onPickAttachments}>
+            <Ionicons
+              name="attach"
+              size={22}
+              color={allowAttachments && !isSubmitting ? colors.mutedText : `${colors.mutedText}55`}
+            />
           </Pressable>
+          <Text style={[styles.attachmentHint, { color: colors.mutedText }]}>
+            {allowAttachments
+              ? 'txt, md, pdf, png, jpg, webp • up to 10 MB each'
+              : ''}
+          </Text>
         </View>
       </View>
     </KeyboardAvoidingView>
@@ -937,6 +1114,7 @@ export function ThreadPane({
   title = 'Feedback Desk',
   agentId,
   artifactDisplayMode = 'timeline',
+  allowAttachments = false,
   onStreamEvent,
 }: Props) {
   const colors = useCodefleetColors();
@@ -944,6 +1122,7 @@ export function ThreadPane({
   const [selectedSessionId, setSelectedSessionId] = useState('new');
   const [messages, setMessages] = useState<ThreadMessage[]>([]);
   const [draft, setDraft] = useState('');
+  const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isLoadingConversation, setIsLoadingConversation] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
@@ -955,6 +1134,7 @@ export function ThreadPane({
   const turnHistoryRef = useRef<Record<string, AgentEntry>>({});
   const streamDraftRef = useRef<StreamDraft | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const elapsedSeconds = useMemo(() => {
     if (!isRunningRemote || !runStartedAt) return 0;
@@ -1088,17 +1268,128 @@ export function ThreadPane({
     streamDraftRef.current = null;
   }, []);
 
+  const handleRemoveAttachment = useCallback((id: string) => {
+    setAttachments((current) => current.filter((attachment) => attachment.id !== id));
+  }, []);
+
+  const handlePickAttachments = useCallback(() => {
+    if (!allowAttachments || isSubmitting || Platform.OS !== 'web' || typeof document === 'undefined') {
+      return;
+    }
+    let input = fileInputRef.current;
+    if (!input) {
+      input = document.createElement('input');
+      input.type = 'file';
+      input.multiple = true;
+      input.accept = SUPPORTED_ATTACHMENT_EXTENSIONS;
+      input.onchange = () => {
+        const selected = Array.from(input?.files ?? []);
+        input!.value = '';
+        if (selected.length === 0) {
+          return;
+        }
+        void (async () => {
+          try {
+            const prepared = await Promise.all(
+              selected.map(async (file) => {
+                const mimeType = inferMimeType(file);
+                if (!SUPPORTED_ATTACHMENT_MIME_TYPES.has(mimeType)) {
+                  throw new Error(`${file.name}: unsupported file type`);
+                }
+                if (file.size > MAX_FILE_SIZE_BYTES) {
+                  throw new Error(`${file.name}: file exceeds 10 MB`);
+                }
+                const dataUrl = await readFileAsDataUrl(file);
+                const commaIndex = dataUrl.indexOf(',');
+                const base64Data = commaIndex >= 0 ? dataUrl.slice(commaIndex + 1) : '';
+                const previewUri = isImageMimeType(mimeType) ? dataUrl : undefined;
+                const contentPart: AgentContentPart = isImageMimeType(mimeType)
+                  ? {
+                      type: 'image',
+                      source: {
+                        type: 'base64',
+                        mediaType: mimeType,
+                        data: base64Data,
+                      },
+                    }
+                  : {
+                      type: 'file',
+                      file: {
+                        name: file.name,
+                        mimeType,
+                        sizeBytes: file.size,
+                        source: {
+                          type: 'base64',
+                          mediaType: mimeType,
+                          data: base64Data,
+                        },
+                      },
+                    };
+                return {
+                  id: generateAttachmentId(),
+                  name: file.name,
+                  mimeType,
+                  sizeBytes: file.size,
+                  previewUri,
+                  contentPart,
+                  status: 'queued' as const,
+                };
+              }),
+            );
+            const totalBytes =
+              attachments.reduce((sum, attachment) => sum + attachment.sizeBytes, 0) +
+              prepared.reduce((sum, attachment) => sum + attachment.sizeBytes, 0);
+            if (attachments.length + prepared.length > MAX_ATTACHMENTS_PER_MESSAGE) {
+              throw new Error(`attachments are limited to ${MAX_ATTACHMENTS_PER_MESSAGE} files per message`);
+            }
+            if (totalBytes > MAX_TOTAL_ATTACHMENT_BYTES) {
+              throw new Error('attachments exceed 25 MB per message');
+            }
+            setAttachments((current) => [...current, ...prepared]);
+          } catch (error) {
+            setErrorMessage(error instanceof Error ? error.message : 'Failed to prepare attachment.');
+          }
+        })();
+      };
+      fileInputRef.current = input;
+    }
+    input.click();
+  }, [allowAttachments, attachments, isSubmitting]);
+
   const handleSubmit = useCallback(async () => {
     const text = draft.trim();
-    if (!text || isSubmitting) return;
+    if ((text.length === 0 && attachments.length === 0) || isSubmitting) return;
+    if (attachments.some((attachment) => attachment.status === 'failed')) {
+      setErrorMessage('Remove failed attachments before sending.');
+      return;
+    }
 
     const startedAt = new Date().toISOString();
+    const userContentParts: MessageContentPart[] = [
+      ...(text ? [{ type: 'text' as const, text }] : []),
+      ...attachments.map((attachment) => {
+        if (attachment.contentPart.type === 'image') {
+          return {
+            type: 'image' as const,
+            url: attachment.previewUri ?? '',
+          };
+        }
+        return {
+          type: 'file' as const,
+          name: attachment.name,
+          mimeType: attachment.mimeType,
+          sizeBytes: attachment.sizeBytes,
+          url: attachment.previewUri,
+        };
+      }),
+    ];
     const optimisticUser: ThreadMessage = {
       id: messageId('user'),
       role: 'user',
       author: 'You',
       timestamp: startedAt,
       content: text,
+      contentParts: userContentParts.length > 0 ? userContentParts : undefined,
       status: 'completed',
     };
     const optimisticAgent: ThreadMessage = {
@@ -1117,6 +1408,7 @@ export function ThreadPane({
     };
 
     setDraft('');
+    setAttachments((current) => current.map((attachment) => ({ ...attachment, status: 'preparing', errorMessage: undefined })));
     setErrorMessage(null);
     setIsSubmitting(true);
     setIsRunningRemote(true);
@@ -1136,7 +1428,11 @@ export function ThreadPane({
 
     try {
       const result = await client.runAgent({
-        message: text,
+        message: text || undefined,
+        input: [
+          ...attachments.map((attachment) => attachment.contentPart),
+          ...(text ? [{ type: 'text' as const, text }] : []),
+        ],
         agentId,
         sessionId: selectedSessionId === 'new' ? undefined : selectedSessionId,
         signal: abortController.signal,
@@ -1178,6 +1474,7 @@ export function ThreadPane({
           status: result.status === 'error' ? 'failed' : 'succeeded',
         };
       }
+      setAttachments([]);
       const nextSessionId = result.sessionId || selectedSessionId;
       setSelectedSessionId(nextSessionId);
       await Promise.all([loadConversation(nextSessionId), refreshSessions()]);
@@ -1190,6 +1487,9 @@ export function ThreadPane({
         return;
       }
       const message = error instanceof Error ? error.message : 'Failed to send message.';
+      setAttachments((current) =>
+        current.map((attachment) => ({ ...attachment, status: 'failed', errorMessage: message })),
+      );
       setMessages((previous) => {
         if (previous.length === 0) return previous;
         const next = [...previous];
@@ -1212,7 +1512,7 @@ export function ThreadPane({
     } finally {
       setIsSubmitting(false);
     }
-  }, [agentId, artifactDisplayMode, client, draft, isSubmitting, loadConversation, onStreamEvent, refreshSessions, selectedSessionId, title]);
+  }, [agentId, artifactDisplayMode, attachments, client, draft, isSubmitting, loadConversation, onStreamEvent, refreshSessions, selectedSessionId, title]);
 
   return (
     <View style={[styles.container, { backgroundColor: colors.surface }]}>
@@ -1313,10 +1613,15 @@ export function ThreadPane({
 
       <Composer
         draft={draft}
+        attachments={attachments}
         onChangeDraft={setDraft}
+        onPickAttachments={handlePickAttachments}
+        onRemoveAttachment={handleRemoveAttachment}
         onSubmit={() => void handleSubmit()}
         onAbort={handleAbort}
         isSubmitting={isSubmitting}
+        allowAttachments={allowAttachments}
+        hasFailedAttachments={attachments.some((attachment) => attachment.status === 'failed')}
         colors={colors}
       />
     </View>
@@ -1458,6 +1763,28 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     gap: 8,
   },
+  userPartsGroup: {
+    marginBottom: 8,
+    gap: 8,
+  },
+  fileChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    maxWidth: 420,
+  },
+  fileChipName: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  fileChipMeta: {
+    fontSize: 12,
+  },
   inlineImage: {
     width: 240,
     maxWidth: '100%',
@@ -1532,6 +1859,40 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'flex-start',
+    gap: 8,
+  },
+  attachmentList: {
+    gap: 8,
+  },
+  attachmentChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  attachmentPreview: {
+    width: 36,
+    height: 36,
+    borderRadius: 8,
+    backgroundColor: '#00000012',
+  },
+  attachmentTextGroup: {
+    flex: 1,
+    gap: 2,
+  },
+  attachmentName: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  attachmentMeta: {
+    fontSize: 12,
+  },
+  attachmentHint: {
+    flex: 1,
+    fontSize: 12,
   },
   input: {
     flex: 1,

@@ -180,7 +180,7 @@ export function ReleasePlanWorkspace({ client }: Props) {
         previous
           .map((artifact) =>
             artifact.id === itemId
-              ? { ...artifact, path: path ?? artifact.path, status: 'completed', updatedAt: Date.now() }
+              ? ({ ...artifact, path: path ?? artifact.path, status: 'completed', updatedAt: Date.now() } as StreamingArtifact)
               : artifact,
           )
           .sort((a, b) => b.updatedAt - a.updatedAt),
@@ -201,7 +201,7 @@ export function ReleasePlanWorkspace({ client }: Props) {
 
     if (type === 'agent.tool_call_finish') {
       const summary = typeof params?.summary === 'string' ? params.summary : '';
-      const status = params?.status === 'failed' ? 'failed' : 'completed';
+      const status: CommitState['status'] = params?.status === 'failed' ? 'failed' : 'completed';
       const errorMessage = typeof params?.errorMessage === 'string' ? params.errorMessage : undefined;
       if (summary === 'release_plan_commit') {
         setCommitState({
@@ -233,6 +233,7 @@ export function ReleasePlanWorkspace({ client }: Props) {
           title=""
           agentId="release-plan"
           artifactDisplayMode="external"
+          allowAttachments
           onStreamEvent={handleThreadStreamEvent}
         />
       </View>
