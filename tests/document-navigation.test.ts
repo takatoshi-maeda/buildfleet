@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildBreadcrumbSegments,
   resolveDocumentLink,
-} from '../ui/src/components/document/documentNavigation.ts';
+} from '@takatoshi-maeda/ai-kit-expo/document';
 
 describe('resolveDocumentLink', () => {
   it('resolves sibling documents relative to the current file', () => {

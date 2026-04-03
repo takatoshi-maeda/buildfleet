@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
-import { findDefaultDocumentFileId } from '../ui/src/components/document/documentDefaultSelection.ts';
-import type { DocumentTreeNode } from '../ui/src/components/document/documentTypes.ts';
+import type { DocumentTreeNode } from '@takatoshi-maeda/ai-kit-expo/client';
+
+import { findDefaultDocumentFileId } from '../../ai-kit-expo/src/document/helpers';
 
 function file(path: string): DocumentTreeNode {
   const name = path.split('/').at(-1) ?? path;

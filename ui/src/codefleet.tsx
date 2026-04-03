@@ -2,10 +2,10 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Animated, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { Stack } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { DocumentWorkspace } from '@takatoshi-maeda/ai-kit-expo';
 
 import { Board } from './components/Board';
 import { ReleasePlanWorkspace } from './components/ReleasePlanWorkspace';
-import { DocumentWorkspace } from './components/document/DocumentWorkspace';
 import { ThreadPane } from './components/ThreadPane';
 import { useCodefleetBoard } from './hooks/useCodefleetBoard';
 import type { CodefleetClient } from './mcp/client';
