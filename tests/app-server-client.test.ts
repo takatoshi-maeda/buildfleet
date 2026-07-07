@@ -96,7 +96,7 @@ describe("AppServerClient", () => {
       "codex",
       [
         "-a",
-        "never",
+        "on-request",
         "-c",
         "model=gpt-5-mini-codex",
         "-c",
@@ -115,6 +115,9 @@ describe("AppServerClient", () => {
     expect(startThreadRequest?.params).toMatchObject({
       model: "gpt-5-mini-codex",
       baseInstructions: "All responses must be in ja.",
+      approvalPolicy: "on-request",
+      approvalsReviewer: "auto_review",
+      sandbox: "workspace-write",
     });
 
     const startTurnRequest = requests.find((request) => request.method === "turn/start");
@@ -122,5 +125,61 @@ describe("AppServerClient", () => {
       model: "gpt-5-mini-codex",
       effort: "medium",
     });
+  });
+
+  it("auto-declines guardian-escalated approval requests and surfaces them as notifications", async () => {
+    const child = new MockChildProcess();
+    const written: Array<{ id?: number; method?: string; result?: Record<string, unknown>; error?: { code?: number } }> = [];
+    child.stdin.on("data", (chunk: Buffer | string) => {
+      for (const line of chunk.toString("utf8").split("\n")) {
+        if (line.trim()) {
+          written.push(JSON.parse(line) as (typeof written)[number]);
+        }
+      }
+    });
+    spawnMock.mockReturnValue(child);
+
+    const client = new AppServerClient();
+    const notifications: Array<{ method: string; params?: Record<string, unknown> }> = [];
+    client.addNotificationListener((notification) => {
+      notifications.push({ method: notification.method, params: notification.params });
+    });
+    await client.startAgent({
+      agentId: "developer-1",
+      role: "Developer",
+      prompt: "prompt",
+      cwd: "/workspace",
+      detached: false,
+    });
+
+    child.stdout.write(
+      `${JSON.stringify({
+        id: 77,
+        method: "item/commandExecution/requestApproval",
+        params: { threadId: "thread-1", turnId: "turn-1", itemId: "item-1", command: "rm -rf /tmp/x" },
+      })}\n`,
+    );
+    child.stdout.write(
+      `${JSON.stringify({
+        id: 78,
+        method: "item/tool/requestUserInput",
+        params: { threadId: "thread-1" },
+      })}\n`,
+    );
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(written).toContainEqual({ id: 77, result: { decision: "decline" } });
+    const errorResponse = written.find((message) => message.id === 78);
+    expect(errorResponse?.error?.code).toBe(-32601);
+    expect(notifications).toMatchObject([
+      {
+        method: "item/commandExecution/requestApproval",
+        params: { command: "rm -rf /tmp/x", codefleetAutoResponse: "decline" },
+      },
+      {
+        method: "item/tool/requestUserInput",
+        params: { codefleetAutoResponse: "unsupported" },
+      },
+    ]);
   });
 });

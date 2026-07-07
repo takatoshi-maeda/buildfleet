@@ -620,12 +620,12 @@ describe("FleetService", () => {
     expect(claudeRuntime.prepared.map((entry) => [entry.agentId, entry.runtimeConfig])).toEqual([
       [
         "orchestrator-1",
-        { model: "claude-opus-4-6", permissionMode: "bypassPermissions", settings: { autoMemoryEnabled: false } },
+        { model: "claude-opus-4-6", permissionMode: "auto", settings: { autoMemoryEnabled: false } },
       ],
-      ["curator-1", { model: "claude-opus-4-6", permissionMode: "bypassPermissions", settings: { autoMemoryEnabled: false } }],
+      ["curator-1", { model: "claude-opus-4-6", permissionMode: "auto", settings: { autoMemoryEnabled: false } }],
       [
         "frontend-developer-1",
-        { model: "claude-opus-4-6", permissionMode: "bypassPermissions", settings: { autoMemoryEnabled: false } },
+        { model: "claude-opus-4-6", permissionMode: "auto", settings: { autoMemoryEnabled: false } },
       ],
     ]);
     expect(codexRuntime.prepared.map((entry) => [entry.agentId, entry.runtimeConfig])).toEqual([
@@ -640,7 +640,7 @@ describe("FleetService", () => {
       provider: "claude-agent-sdk",
       runtimeOptions: {
         model: "claude-opus-4-6",
-        permissionMode: "bypassPermissions",
+        permissionMode: "auto",
         settings: { autoMemoryEnabled: false },
       },
     });
@@ -773,7 +773,7 @@ describe("FleetService", () => {
     });
     expect(claudeRuntime.prepared.find((entry) => entry.agentId === "orchestrator-1")?.runtimeConfig).toEqual({
       model: "claude-opus-4-6",
-      permissionMode: "bypassPermissions",
+      permissionMode: "auto",
       settings: { autoMemoryEnabled: false },
     });
     expect(codexRuntime.prepared.find((entry) => entry.agentId === "developer-1")?.runtimeConfig).toEqual({
@@ -940,7 +940,7 @@ describe("FleetService", () => {
     expect(status.sessions.find((session) => session.agentId === "orchestrator-1")?.provider).toBe("claude-agent-sdk");
   });
 
-  it("applies bypassPermissions by default for claude-agent-sdk role configs", async () => {
+  it("applies auto permission mode by default for claude-agent-sdk role configs", async () => {
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codefleet-fleet-"));
     const rolesPath = path.join(tempDir, ".codefleet/roles.json");
     const runtimeDir = path.join(tempDir, ".codefleet/runtime");
@@ -976,7 +976,7 @@ describe("FleetService", () => {
 
     expect(claudeRuntime.prepared[0]?.runtimeConfig).toEqual({
       model: "claude-sonnet-4-5",
-      permissionMode: "bypassPermissions",
+      permissionMode: "auto",
       persistSession: false,
       settings: { autoMemoryEnabled: false },
     });
@@ -984,7 +984,7 @@ describe("FleetService", () => {
     const status = await service.status("Orchestrator");
     expect(status.agents[0]?.runtimeOptions).toEqual({
       model: "claude-sonnet-4-5",
-      permissionMode: "bypassPermissions",
+      permissionMode: "auto",
       persistSession: false,
       settings: { autoMemoryEnabled: false },
     });
@@ -1029,7 +1029,7 @@ describe("FleetService", () => {
 
     expect(claudeRuntime.prepared[0]?.runtimeConfig).toEqual({
       model: "claude-sonnet-4-5",
-      permissionMode: "bypassPermissions",
+      permissionMode: "auto",
       settings: { autoMemoryEnabled: true },
     });
   });

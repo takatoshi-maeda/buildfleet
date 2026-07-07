@@ -54,6 +54,24 @@ describe("fleet agent event log formatting", () => {
     });
   });
 
+  it("logs auto-answered v2 approval requests at warn level", () => {
+    const record = formatAgentRuntimeHumanLog({
+      agentId: "developer-1",
+      provider: "codex-app-server",
+      occurredAt: "2026-03-05T10:00:00.000Z",
+      kind: "native",
+      nativeType: "item/commandExecution/requestApproval",
+      message: "approval auto-decline: rm -rf node_modules",
+    });
+
+    expect(record).toEqual({
+      ts: "2026-03-05T10:00:00.000Z",
+      level: "warn",
+      agentId: "developer-1",
+      message: "approval auto-decline: rm -rf node_modules",
+    });
+  });
+
   it("truncates oversized payload fields so each line remains readable", () => {
     const longText = "x".repeat(600);
     const record = formatAgentRuntimeEventLog(

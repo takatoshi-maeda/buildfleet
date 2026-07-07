@@ -190,6 +190,29 @@ function mapAppServerNotificationToRuntimeEvent(notification: {
     };
   }
 
+  if (
+    notification.method === "item/commandExecution/requestApproval" ||
+    notification.method === "item/fileChange/requestApproval"
+  ) {
+    // Emitted by AppServerClient after it auto-answers a guardian-escalated
+    // approval request; surface the decision so operators can audit declines.
+    const command = readString(payload, ["command"]);
+    const reason = readString(payload, ["reason"]);
+    const decision = readString(payload, ["codefleetAutoResponse"]) ?? "decline";
+    const subject = command ?? (notification.method === "item/fileChange/requestApproval" ? "file change" : "command");
+    return {
+      agentId: notification.agentId,
+      provider: "codex-app-server" as const,
+      occurredAt: notification.receivedAt,
+      kind: "native" as const,
+      message: `approval auto-${decision}: ${subject}${reason ? ` reason=${reason}` : ""}`,
+      nativeType: notification.method,
+      conversationId: readString(payload, ["threadId"]) ?? null,
+      activeInvocationId: readString(payload, ["turnId"]) ?? null,
+      payload,
+    };
+  }
+
   if (notification.method === "thread/started") {
     const threadId = readString(payload, ["thread", "id"]);
     return {

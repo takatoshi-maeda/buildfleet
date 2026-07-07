@@ -85,8 +85,20 @@ type RpcNotificationMessage = {
   params?: Record<string, unknown>;
 };
 
-const AGENT_APPROVAL_POLICY = "never";
-const AGENT_SANDBOX_MODE = "danger-full-access";
+type RpcServerRequestMessage = {
+  id: number;
+  method: string;
+  params?: Record<string, unknown>;
+};
+
+// Codefleet agents run directly on the host, so mirror Codex's "Auto-review"
+// permission mode ("Approve for me"): workspace-write sandbox with on-request
+// approvals routed to the guardian auto-reviewer. Only actions the guardian
+// flags as potentially unsafe escalate to this client, which declines them
+// (see handleServerRequest) because fleets run headless.
+const AGENT_APPROVAL_POLICY = "on-request";
+const AGENT_SANDBOX_MODE = "workspace-write";
+const AGENT_APPROVALS_REVIEWER = "auto_review";
 const AGENT_MODEL = "gpt-5.3-codex";
 const AGENT_REASONING_EFFORT = "xhigh";
 const AGENT_THREAD_NETWORK_ACCESS_DEFAULT = true;
@@ -184,6 +196,7 @@ export class AppServerClient {
     // Pin thread defaults here so resumed work stays on the same model/policy without per-turn drift.
     const response = await sendRequest(connection, "thread/start", {
       approvalPolicy: AGENT_APPROVAL_POLICY,
+      approvalsReviewer: AGENT_APPROVALS_REVIEWER,
       sandbox: AGENT_SANDBOX_MODE,
       // app-server applies this config override to the thread's workspace-write sandbox defaults.
       // We keep this explicit so outbound network enablement is controlled at thread bootstrap time.
@@ -207,6 +220,7 @@ export class AppServerClient {
     const response = await sendRequest(connection, "thread/resume", {
       threadId,
       approvalPolicy: AGENT_APPROVAL_POLICY,
+      approvalsReviewer: AGENT_APPROVALS_REVIEWER,
       sandbox: AGENT_SANDBOX_MODE,
       model: readCodexModel(connection.codexConfig),
     });
@@ -349,6 +363,11 @@ function wireConnectionLifecycle(
 
     connection.lastNotificationAt = new Date().toISOString();
     if ("id" in parsed && typeof parsed.id === "number") {
+      if ("method" in parsed) {
+        handleServerRequest(connection, parsed, onNotification);
+        return;
+      }
+
       const pending = connection.pending.get(parsed.id);
       if (!pending) {
         return;
@@ -415,6 +434,47 @@ function wireConnectionLifecycle(
   return finalize;
 }
 
+// Approval requests that support a structured "decline" decision. Requests
+// arriving here already passed the guardian auto-reviewer, meaning Codex judged
+// the action potentially unsafe; fleets run headless with nobody to prompt, so
+// the safe host-side default is to decline and let the agent continue the turn.
+const AUTO_DECLINED_SERVER_REQUEST_METHODS = new Set([
+  "item/commandExecution/requestApproval",
+  "item/fileChange/requestApproval",
+]);
+
+function handleServerRequest(
+  connection: AppServerConnection,
+  request: RpcServerRequestMessage,
+  onNotification?: (notification: AppServerNotification) => void,
+): void {
+  const declined = AUTO_DECLINED_SERVER_REQUEST_METHODS.has(request.method);
+  try {
+    if (declined) {
+      writeRpcLine(connection, { id: request.id, result: { decision: "decline" } });
+    } else {
+      // Other server requests (user input, elicitations, permission grants)
+      // have no meaningful headless answer; an error response still unblocks
+      // the pending turn on the app-server side.
+      writeRpcLine(connection, {
+        id: request.id,
+        error: { code: -32601, message: `codefleet client cannot answer ${request.method}` },
+      });
+    }
+  } catch {
+    // stdin already closed; connection teardown will reject pending work.
+  }
+  onNotification?.({
+    agentId: connection.agentId,
+    method: request.method,
+    params: {
+      ...request.params,
+      codefleetAutoResponse: declined ? "decline" : "unsupported",
+    },
+    receivedAt: connection.lastNotificationAt,
+  });
+}
+
 async function sendRequest(
   connection: AppServerConnection,
   method: string,
@@ -453,13 +513,13 @@ function writeRpcLine(connection: AppServerConnection, message: Record<string, u
   connection.child.stdin.write(payload);
 }
 
-function parseRpcLine(line: string): RpcResponseMessage | RpcNotificationMessage | null {
+function parseRpcLine(line: string): RpcResponseMessage | RpcNotificationMessage | RpcServerRequestMessage | null {
   try {
     const parsed = JSON.parse(line) as unknown;
     if (typeof parsed !== "object" || parsed === null) {
       return null;
     }
-    return parsed as RpcResponseMessage | RpcNotificationMessage;
+    return parsed as RpcResponseMessage | RpcNotificationMessage | RpcServerRequestMessage;
   } catch {
     return null;
   }

@@ -38,7 +38,9 @@ const FIXED_ORCHESTRATOR_COUNT = 1;
 const FIXED_CURATOR_COUNT = 1;
 const LEGACY_APP_SERVER_SESSION_FILE = "app-server-sessions.json";
 const SUPPORTED_AGENT_PROVIDERS = ["codex-app-server", "claude-agent-sdk"] as const;
-const DEFAULT_CLAUDE_AGENT_SDK_PERMISSION_MODE = "bypassPermissions" as const;
+// Auto mode keeps host execution safe: the SDK auto-approves tool calls only
+// after a background safety check instead of skipping permissions outright.
+const DEFAULT_CLAUDE_AGENT_SDK_PERMISSION_MODE = "auto" as const;
 const DEFAULT_CLAUDE_AGENT_SDK_AUTO_MEMORY_ENABLED = false;
 
 interface ResolvedRoleRuntimeConfig {

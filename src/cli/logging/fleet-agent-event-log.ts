@@ -88,7 +88,7 @@ export function formatAgentRuntimeHumanLog(event: AgentRuntimeEvent): FleetAgent
   if (!message) {
     return null;
   }
-  const level: FleetAgentHumanLogRecord["level"] = event.nativeType === "codex/event/exec_approval_request" ? "warn" : "info";
+  const level: FleetAgentHumanLogRecord["level"] = isApprovalRequestNativeType(event.nativeType) ? "warn" : "info";
   return {
     ts: event.occurredAt,
     level,
@@ -134,6 +134,14 @@ export function diagnoseAgentRuntimeConsoleLog(event: AgentRuntimeEvent): FleetA
     level: human.level,
     extractedHumanMessage: human.message,
   };
+}
+
+function isApprovalRequestNativeType(nativeType: string | undefined): boolean {
+  return (
+    nativeType === "codex/event/exec_approval_request" ||
+    nativeType === "item/commandExecution/requestApproval" ||
+    nativeType === "item/fileChange/requestApproval"
+  );
 }
 
 function isAllowedConsoleMessage(message: string): boolean {

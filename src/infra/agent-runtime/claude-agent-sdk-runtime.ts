@@ -13,9 +13,12 @@ import type {
 } from "../../domain/fleet/role-agent-runtime.js";
 import { DefaultClaudeAgentSdkClient, type ClaudeAgentSdkClient } from "./claude-agent-sdk-client.js";
 
-const SUPPORTED_PERMISSION_MODES = ["default", "acceptEdits", "bypassPermissions", "plan", "dontAsk"] as const;
+const SUPPORTED_PERMISSION_MODES = ["default", "acceptEdits", "bypassPermissions", "plan", "dontAsk", "auto"] as const;
 const SUPPORTED_SETTING_SOURCES = ["user", "project", "local"] as const;
-const DEFAULT_CLAUDE_PERMISSION_MODE = "bypassPermissions" as const;
+// Codefleet agents run directly on the host (not in a disposable container), so
+// default to Claude Code's Auto mode: tool calls are auto-approved only after a
+// background safety check, instead of bypassing permissions entirely.
+const DEFAULT_CLAUDE_PERMISSION_MODE = "auto" as const;
 const DEFAULT_CLAUDE_AUTO_MEMORY_ENABLED = false;
 
 export class ClaudeAgentSdkRuntime implements RoleAgentRuntime {
@@ -58,7 +61,7 @@ export class ClaudeAgentSdkRuntime implements RoleAgentRuntime {
     try {
       for await (const message of claudeQuery) {
         lastActivityAt = new Date().toISOString();
-        conversationId = message.session_id;
+        conversationId = message.session_id ?? conversationId;
         activeInvocationId = readInvocationId(message, activeInvocationId);
         const event = this.mapMessageToRuntimeEvent(input.agentId, message, conversationId, activeInvocationId);
         if (event) {

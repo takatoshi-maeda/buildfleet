@@ -173,7 +173,7 @@ describe("ClaudeAgentSdkRuntime", () => {
     });
   });
 
-  it("defaults permissionMode to bypassPermissions when omitted", async () => {
+  it("defaults permissionMode to auto when omitted", async () => {
     const client = new FakeClaudeAgentSdkClient();
     const runtime = new ClaudeAgentSdkRuntime(client);
 
@@ -186,10 +186,10 @@ describe("ClaudeAgentSdkRuntime", () => {
     });
 
     expect(client.calls[0]?.options).toMatchObject({
-      permissionMode: "bypassPermissions",
-      allowDangerouslySkipPermissions: true,
+      permissionMode: "auto",
       settings: { autoMemoryEnabled: false },
     });
+    expect(client.calls[0]?.options.allowDangerouslySkipPermissions).toBeUndefined();
   });
 
   it("allows runtimeConfig.settings to override the auto-memory default", async () => {
