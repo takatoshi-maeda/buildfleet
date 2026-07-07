@@ -51,6 +51,17 @@ describe("CLI command layout", () => {
     expect(output).not.toContain("backlog");
   });
 
+  it("keeps restart options in sync with up so restart stays a true down + up", () => {
+    const cli = createCodefleetCli();
+    const findCommand = (name: string) => cli.commands.find((command) => command.name() === name);
+    const longOptionNames = (command: Command | undefined) =>
+      (command?.options ?? []).map((option) => option.long).sort();
+
+    const upOptions = longOptionNames(findCommand("up"));
+    expect(upOptions).toContain("--detached");
+    expect(longOptionNames(findCommand("restart"))).toEqual(upOptions);
+  });
+
   it("exposes acceptance-test as standalone binary", async () => {
     const output = await renderHelp(createAcceptanceTestCli());
 

@@ -64,11 +64,6 @@ interface FleetStartupAutoRecoveryQueueService {
   }>;
 }
 
-interface DockerEnvironmentDependencies {
-  fileExists: (path: string) => Promise<boolean>;
-  readFile: (path: string, encoding: BufferEncoding) => Promise<string>;
-}
-
 interface FleetPeerEndpointRecord {
   projectId?: string;
   instanceId: string;
@@ -130,8 +125,6 @@ const AGENT_RUNTIME_MANAGER_PID_PATH = path.join(".codefleet", "runtime", "agent
 const PLAYWRIGHT_SERVER_PID_PATH = path.join(".codefleet", "runtime", "playwright-server.pid");
 const DEFAULT_RUNTIME_DIR = path.join(".codefleet", "runtime");
 const DEFAULT_AGENT_LOG_DIR = path.join(".codefleet", "logs", "agents");
-const DOCKER_ENV_FILE_PATH = "/.dockerenv";
-const DOCKER_CGROUP_PATHS = ["/proc/self/cgroup", "/proc/1/cgroup"] as const;
 const DEFAULT_QUEUE_CONSUME_MAX = 50;
 const DEFAULT_QUEUE_POLL_INTERVAL_MS = 1_000;
 const DEFAULT_EPIC_READY_POLL_INTERVAL_MS = 3_000;
@@ -139,12 +132,31 @@ const DEFAULT_PLAYWRIGHT_HOST = "localhost";
 const DEFAULT_PLAYWRIGHT_PORT = 9333;
 const PLAYWRIGHT_READY_TIMEOUT_MS = 10_000;
 const PLAYWRIGHT_SHUTDOWN_TIMEOUT_MS = 10_000;
+const AGENT_RUNTIME_MANAGER_SHUTDOWN_TIMEOUT_MS = 10_000;
 const FORCE_EXIT_SIGNAL_ARM_DELAY_MS = 250;
 const DEBUG_REASONING_LOGGING_ENABLED =
   process.env.CODEFLEET_DEBUG_REASONING === "1" || process.env.CODEFLEET_DEBUG_REASONING === "true";
 const DEBUG_APP_SERVER_EVENTS_ENV_ENABLED =
   process.env.CODEFLEET_DEBUG_APP_SERVER_EVENTS === "1" || process.env.CODEFLEET_DEBUG_APP_SERVER_EVENTS === "true";
 type LogMode = "human" | "jsonl";
+
+// Commander delivers option values as strings (string defaults) or booleans
+// (flags); parse helpers accept `unknown` and validate, so mirror that here.
+interface FleetUpCliOptions {
+  detached?: boolean;
+  verbose?: boolean;
+  lang?: unknown;
+  epicReadyPollIntervalSec?: unknown;
+  playwrightHost?: unknown;
+  playwrightPort?: unknown;
+  gatekeepers?: unknown;
+  frontendDevelopers?: unknown;
+  developers?: unknown;
+  polishers?: unknown;
+  reviewers?: unknown;
+  debugAppServerEvents?: boolean;
+  skipStartupPreflight?: boolean;
+}
 const ANSI_RESET = "\u001b[0m";
 const ANSI_BOLD = "\u001b[1m";
 const ROLE_COLOR_BY_PREFIX: Record<string, string> = {
@@ -243,25 +255,10 @@ export function createFleetctlCommand(options: FleetctlCommandOptions = {}): Com
       console.log(JSON.stringify(output, null, 2));
     });
 
-  cmd
-    .command("up")
-    .description("Start agents")
-    .option("-d, --detached", "Run in background")
-    .option("--verbose", "Emit verbose JSONL logs for diagnostics")
-    .option("--lang <lang>", "Set response language for newly started event threads")
-    .option("--epic-ready-poll-interval-sec <seconds>", "Polling interval for backlog epic ready detection", "3")
-    .option("--playwright-host <host>", "Host to bind playwright run-server", DEFAULT_PLAYWRIGHT_HOST)
-    .option("--playwright-port <port>", "Port to bind playwright run-server", String(DEFAULT_PLAYWRIGHT_PORT))
-    .option("--gatekeepers <count>", "Number of Gatekeeper agents", "1")
-    .option("--frontend-developers <count>", "Number of FrontendDeveloper agents", "1")
-    .option("--developers <count>", "Number of Developer agents", "1")
-    .option("--polishers <count>", "Number of Polisher agents", "1")
-    .option("--reviewers <count>", "Number of Reviewer agents", "1")
-    .option("--debug-app-server-events", "Print raw Codex AppServer notifications for debugging", false)
-    .option("--skip-startup-preflight", "Skip internal startup preflight checks", false)
-    .action(async (options) => {
+  // Shared by `up` and the start phase of `restart` so both go through the
+  // same preflight, detached-spawn, and foreground lifecycle handling.
+  const runUpAction = async (options: FleetUpCliOptions): Promise<void> => {
       await ensureNoConflictingRuntimeManagerIsRunning();
-      await assertDockerContainerEnvironment();
       logMode = Boolean(options.verbose) ? "jsonl" : "human";
       debugAppServerEvents = DEBUG_APP_SERVER_EVENTS_ENV_ENABLED || Boolean(options.debugAppServerEvents);
       const requestedAt = new Date().toISOString();
@@ -405,7 +402,25 @@ export function createFleetctlCommand(options: FleetctlCommandOptions = {}): Com
       // Foreground `fleetctl up` is expected to terminate after graceful shutdown even if
       // third-party internals leave residual handles alive. Exiting explicitly prevents hangs.
       process.exit(process.exitCode ?? 0);
-    });
+  };
+
+  cmd
+    .command("up")
+    .description("Start agents")
+    .option("-d, --detached", "Run in background")
+    .option("--verbose", "Emit verbose JSONL logs for diagnostics")
+    .option("--lang <lang>", "Set response language for newly started event threads")
+    .option("--epic-ready-poll-interval-sec <seconds>", "Polling interval for backlog epic ready detection", "3")
+    .option("--playwright-host <host>", "Host to bind playwright run-server", DEFAULT_PLAYWRIGHT_HOST)
+    .option("--playwright-port <port>", "Port to bind playwright run-server", String(DEFAULT_PLAYWRIGHT_PORT))
+    .option("--gatekeepers <count>", "Number of Gatekeeper agents", "1")
+    .option("--frontend-developers <count>", "Number of FrontendDeveloper agents", "1")
+    .option("--developers <count>", "Number of Developer agents", "1")
+    .option("--polishers <count>", "Number of Polisher agents", "1")
+    .option("--reviewers <count>", "Number of Reviewer agents", "1")
+    .option("--debug-app-server-events", "Print raw Codex AppServer notifications for debugging", false)
+    .option("--skip-startup-preflight", "Skip internal startup preflight checks", false)
+    .action(runUpAction);
 
   cmd
     .command("down")
@@ -415,16 +430,7 @@ export function createFleetctlCommand(options: FleetctlCommandOptions = {}): Com
     .action(async (options) => {
       validateTargetSelection(Boolean(options.all), options.role as AgentRole | undefined, "down");
       if (Boolean(options.all)) {
-        const agentRuntimeManagerPid = await readAgentRuntimeManagerPid();
-        if (
-          agentRuntimeManagerPid !== null &&
-          agentRuntimeManagerPid !== process.pid &&
-          isProcessAlive(agentRuntimeManagerPid)
-        ) {
-          process.kill(agentRuntimeManagerPid, "SIGTERM");
-          await waitForProcessExit(agentRuntimeManagerPid, 10_000);
-        }
-        await stopPlaywrightServerFromPidFile();
+        await stopDetachedFleetProcessesFromPidFiles();
       }
       const status = await service.down({ all: Boolean(options.all), role: options.role as AgentRole | undefined });
       console.log(JSON.stringify(status, null, 2));
@@ -432,23 +438,28 @@ export function createFleetctlCommand(options: FleetctlCommandOptions = {}): Com
 
   cmd
     .command("restart")
-    .description("Restart agents")
+    .description("Restart agents (equivalent to `down --all` followed by `up`)")
     .option("-d, --detached", "Run in background")
+    .option("--verbose", "Emit verbose JSONL logs for diagnostics")
+    .option("--lang <lang>", "Set response language for newly started event threads")
+    .option("--epic-ready-poll-interval-sec <seconds>", "Polling interval for backlog epic ready detection", "3")
+    .option("--playwright-host <host>", "Host to bind playwright run-server", DEFAULT_PLAYWRIGHT_HOST)
+    .option("--playwright-port <port>", "Port to bind playwright run-server", String(DEFAULT_PLAYWRIGHT_PORT))
     .option("--gatekeepers <count>", "Number of Gatekeeper agents", "1")
     .option("--frontend-developers <count>", "Number of FrontendDeveloper agents", "1")
     .option("--developers <count>", "Number of Developer agents", "1")
     .option("--polishers <count>", "Number of Polisher agents", "1")
     .option("--reviewers <count>", "Number of Reviewer agents", "1")
+    .option("--debug-app-server-events", "Print raw Codex AppServer notifications for debugging", false)
+    .option("--skip-startup-preflight", "Skip internal startup preflight checks", false)
     .action(async (options) => {
-      const status = await service.restart({
-        detached: Boolean(options.detached),
-        gatekeepers: Number(options.gatekeepers),
-        frontendDevelopers: Number(options.frontendDevelopers),
-        developers: Number(options.developers),
-        polishers: Number(options.polishers),
-        reviewers: Number(options.reviewers),
-      });
-      console.log(JSON.stringify(status, null, 2));
+      // The running fleet usually lives in a detached manager process, which
+      // in-process FleetService.down cannot reach. Stop it via its pid file
+      // (as `down --all` does) or the up phase would conflict with the old
+      // manager still holding agents and the API server port.
+      await stopDetachedFleetProcessesFromPidFiles();
+      await service.down({ all: true });
+      await runUpAction(options);
     });
 
   cmd
@@ -665,44 +676,6 @@ export async function runFleetStartupAutoRecovery(
       enqueuedAgentIds: enqueueResult.enqueuedAgentIds,
     });
   }
-}
-
-export async function assertDockerContainerEnvironment(
-  deps: DockerEnvironmentDependencies = {
-    fileExists,
-    readFile: fs.readFile,
-  },
-): Promise<void> {
-  const runningInDocker = await isRunningInDockerContainer(deps);
-  if (runningInDocker) {
-    return;
-  }
-  throw new Error("fleet up requires running inside a Docker container.");
-}
-
-export async function isRunningInDockerContainer(deps: DockerEnvironmentDependencies): Promise<boolean> {
-  if (await deps.fileExists(DOCKER_ENV_FILE_PATH)) {
-    return true;
-  }
-
-  // Some runtimes do not expose `/.dockerenv`; use cgroup markers as fallback.
-  for (const cgroupPath of DOCKER_CGROUP_PATHS) {
-    let content = "";
-    try {
-      content = await deps.readFile(cgroupPath, "utf8");
-    } catch (error) {
-      const err = error as NodeJS.ErrnoException;
-      if (err.code === "ENOENT") {
-        continue;
-      }
-      throw error;
-    }
-    if (/(^|\/)(docker|containerd)(\/|$)/u.test(content)) {
-      return true;
-    }
-  }
-
-  return false;
 }
 
 export async function resolveFleetEndpointsFromApi(
@@ -1845,6 +1818,22 @@ async function writeAgentRuntimeManagerPid(pid: number): Promise<void> {
 async function writePlaywrightServerPid(pid: number): Promise<void> {
   await fs.mkdir(path.dirname(PLAYWRIGHT_SERVER_PID_PATH), { recursive: true });
   await fs.writeFile(PLAYWRIGHT_SERVER_PID_PATH, `${pid}\n`, "utf8");
+}
+
+// Stops the detached agent runtime manager and playwright server tracked by
+// pid files. These processes are outside the calling process, so FleetService
+// cannot stop them; both `down --all` and `restart` must go through here.
+async function stopDetachedFleetProcessesFromPidFiles(): Promise<void> {
+  const agentRuntimeManagerPid = await readAgentRuntimeManagerPid();
+  if (
+    agentRuntimeManagerPid !== null &&
+    agentRuntimeManagerPid !== process.pid &&
+    isProcessAlive(agentRuntimeManagerPid)
+  ) {
+    process.kill(agentRuntimeManagerPid, "SIGTERM");
+    await waitForProcessExit(agentRuntimeManagerPid, AGENT_RUNTIME_MANAGER_SHUTDOWN_TIMEOUT_MS);
+  }
+  await stopPlaywrightServerFromPidFile();
 }
 
 async function readAgentRuntimeManagerPid(): Promise<number | null> {

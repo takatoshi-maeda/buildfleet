@@ -330,18 +330,6 @@ export class FleetService {
     return this.status(input.role);
   }
 
-  async restart(input: {
-    detached?: boolean;
-    gatekeepers?: number;
-    frontendDevelopers?: number;
-    developers?: number;
-    polishers?: number;
-    reviewers?: number;
-  }): Promise<FleetStatus> {
-    await this.down({ all: true });
-    return this.up(input);
-  }
-
   async logs(input: { all?: boolean; role?: AgentRole; tail?: number }): Promise<string> {
     const runtime = await this.getOrInitializeRuntime();
     const targets = resolveRuntimeTargets(runtime.agents, { all: input.all, role: input.role });
