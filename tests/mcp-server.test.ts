@@ -79,6 +79,17 @@ describe("McpApiServer", () => {
       });
       expect(fleetStatusPreflightResponse.status).toBe(204);
       expect(fleetStatusPreflightResponse.headers.get("access-control-allow-origin")).toBe("http://localhost:8081");
+
+      // codefleet-web serves the exported bundle from an arbitrary loopback port.
+      const webUiCorsResponse = await fetch(`http://127.0.0.1:${port}/api/codefleet/status`, {
+        headers: { origin: "http://127.0.0.1:8080" },
+      });
+      expect(webUiCorsResponse.headers.get("access-control-allow-origin")).toBe("http://127.0.0.1:8080");
+
+      const externalOriginCorsResponse = await fetch(`http://127.0.0.1:${port}/api/codefleet/status`, {
+        headers: { origin: "http://evil.example.com" },
+      });
+      expect(externalOriginCorsResponse.headers.get("access-control-allow-origin")).toBeNull();
     } finally {
       await server.stop();
     }

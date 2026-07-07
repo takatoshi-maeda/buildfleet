@@ -30,7 +30,9 @@ const DEFAULT_TOOL_AUDIT_LOG_PATH = ".codefleet/runtime/mcp/tool-executions.json
 const MCP_MOUNT_NAME = "codefleet";
 const FRONT_DESK_AGENT_ID = "front-desk";
 const RELEASE_PLAN_AGENT_ID = "release-plan";
-const MCP_ALLOWED_ORIGINS = new Set(["http://localhost:8081"]);
+// The API server binds to loopback only, so any loopback origin (Expo dev
+// server, codefleet-web on an arbitrary port) is trusted for browser access.
+const MCP_ALLOWED_ORIGIN_PATTERN = /^http:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/u;
 const SERVER_STOP_TIMEOUT_MS = 5_000;
 const DOCUMENT_WATCH_HEARTBEAT_MS = 15_000;
 const DOCUMENT_WATCH_POLL_INTERVAL_MS = 1_000;
@@ -220,7 +222,7 @@ function resolveMcpCorsOrigin(origin: string): string | undefined {
   if (normalized.length === 0) {
     return undefined;
   }
-  return MCP_ALLOWED_ORIGINS.has(normalized) ? normalized : undefined;
+  return MCP_ALLOWED_ORIGIN_PATTERN.test(normalized) ? normalized : undefined;
 }
 
 export class McpApiServer {
